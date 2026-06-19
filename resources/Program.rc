@@ -59,6 +59,7 @@ BEGIN
         MENUITEM "Save &As...\tCtrl+Alt+S", IDM_SAVEAS
         MENUITEM SEPARATOR
         MENUITEM "Save on E&xit",       IDM_SAVE_ON_EXIT
+        MENUITEM "Open settings folder", IDM_LOGS_FOLDER
         MENUITEM SEPARATOR
         MENUITEM "E&xit",               IDM_EXIT
     END

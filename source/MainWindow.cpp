@@ -314,8 +314,6 @@ void CreateControls(HWND hWnd)
         { ToolbarIcon::ShowTimeEntries, IDM_SHOW_TIME_ENTRIES, BYTE(TBSTATE_ENABLED | (g_showTimeEntries ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Entries" },
         { ToolbarIcon::ShowPieChart, IDM_SHOW_PIE_CHART, BYTE(TBSTATE_ENABLED | (g_showPieChart ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Pie Chart" },
         { ToolbarIcon::ShowTimer, IDM_SHOW_TIMER, BYTE(TBSTATE_ENABLED | (g_showTimer ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Timer" },
-        { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
-        { ToolbarIcon::LogsFolder, IDM_LOGS_FOLDER, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Logs" },
     };
 
     SendMessage(g_hWndToolbar, TB_ADDBUTTONS, sizeof(toolbarButtons) / sizeof(TBBUTTON), (LPARAM)&toolbarButtons);
@@ -1119,9 +1117,7 @@ void CopyOrGenerateTimeEntriesFilePath(std::span<wchar_t> targetFilename)
     {
         SYSTEMTIME now;
         GetSystemTime(&now);
-        std::wstring settingsPath = GetSettingsPath(true, false);
-        std::wstring baseFilename = settingsPath + L"\\Untitled-" + std::format(L"{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
-        std::wstring filename = baseFilename + L".wdtg.csv";
+        std::wstring filename = L"\\Untitled-" + std::format(L"{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond) + L".wdtg.csv";
         wcsncpy_s(targetFilename.data(), targetFilename.size(), filename.c_str(), _TRUNCATE);
     }
     else
@@ -1133,25 +1129,25 @@ void CopyOrGenerateTimeEntriesFilePath(std::span<wchar_t> targetFilename)
 
 void SaveAsToCSV(HWND hWnd)
 {
-    OPENFILENAME ofn = {};
+    OPENFILENAME openFileName = {};
     WCHAR filename[MAX_PATH * 4] = {};
     CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
 
-    ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = hWnd;
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = DWORD(std::size(filename));
-    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    ofn.nFilterIndex = 1;
-    ofn.lpstrFileTitle = nullptr;
-    ofn.nMaxFileTitle = 0;
-    ofn.lpstrInitialDir = nullptr;
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
-    ofn.lpstrDefExt = L"wdtg.csv";
+    openFileName.lStructSize = sizeof(OPENFILENAME);
+    openFileName.hwndOwner = hWnd;
+    openFileName.lpstrFile = filename;
+    openFileName.nMaxFile = DWORD(std::size(filename));
+    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    openFileName.nFilterIndex = 1;
+    openFileName.lpstrFileTitle = nullptr;
+    openFileName.nMaxFileTitle = 0;
+    openFileName.lpstrInitialDir = nullptr;
+    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+    openFileName.lpstrDefExt = L"wdtg.csv";
 
-    if (GetSaveFileName(&ofn))
+    if (GetSaveFileName(&openFileName))
     {
-        SetTimeEntriesFilePath(ofn.lpstrFile);
+        SetTimeEntriesFilePath(openFileName.lpstrFile);
         SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
     }
 }
@@ -1395,25 +1391,25 @@ void SortTimeEntriesByTime()
 
 void LoadFromCSV(HWND hWnd)
 {
-    OPENFILENAME ofn = {};
+    OPENFILENAME openFileName = {};
     WCHAR filename[MAX_PATH * 4] = {};
     CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
 
-    ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = hWnd;
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = DWORD(std::size(filename));
-    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    ofn.nFilterIndex = 1;
-    ofn.lpstrFileTitle = nullptr;
-    ofn.nMaxFileTitle = 0;
-    ofn.lpstrInitialDir = nullptr;
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-    ofn.lpstrDefExt = L"wdtg.csv";
+    openFileName.lStructSize = sizeof(OPENFILENAME);
+    openFileName.hwndOwner = hWnd;
+    openFileName.lpstrFile = filename;
+    openFileName.nMaxFile = DWORD(std::size(filename));
+    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    openFileName.nFilterIndex = 1;
+    openFileName.lpstrFileTitle = nullptr;
+    openFileName.nMaxFileTitle = 0;
+    openFileName.lpstrInitialDir = nullptr;
+    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    openFileName.lpstrDefExt = L"wdtg.csv";
 
-    if (GetOpenFileName(&ofn))
+    if (GetOpenFileName(&openFileName))
     {
-        SetTimeEntriesFilePath(ofn.lpstrFile);
+        SetTimeEntriesFilePath(openFileName.lpstrFile);
 
         std::wstring fileContent;
         if (!ReadTextFile(filename, fileContent))
@@ -1433,22 +1429,22 @@ void LoadFromCSV(HWND hWnd)
 
 void MergeFromCSV(HWND hWnd)
 {
-    OPENFILENAME ofn = {};
+    OPENFILENAME openFileName = {};
     WCHAR filename[MAX_PATH * 4] = {};
 
-    ofn.lStructSize = sizeof(OPENFILENAME);
-    ofn.hwndOwner = hWnd;
-    ofn.lpstrFile = filename;
-    ofn.nMaxFile = DWORD(std::size(filename));
-    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    ofn.nFilterIndex = 1;
-    ofn.lpstrFileTitle = nullptr;
-    ofn.nMaxFileTitle = 0;
-    ofn.lpstrInitialDir = nullptr;
-    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-    ofn.lpstrDefExt = L"wdtg.csv";
+    openFileName.lStructSize = sizeof(OPENFILENAME);
+    openFileName.hwndOwner = hWnd;
+    openFileName.lpstrFile = filename;
+    openFileName.nMaxFile = DWORD(std::size(filename));
+    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    openFileName.nFilterIndex = 1;
+    openFileName.lpstrFileTitle = nullptr;
+    openFileName.nMaxFileTitle = 0;
+    openFileName.lpstrInitialDir = nullptr;
+    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    openFileName.lpstrDefExt = L"wdtg.csv";
 
-    if (GetOpenFileName(&ofn))
+    if (GetOpenFileName(&openFileName))
     {
         std::wstring fileContent;
         if (!ReadTextFile(filename, fileContent))
@@ -1809,35 +1805,19 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             break;
         case IDM_POLLING_1SEC:
             g_pollingInterval = 1000;
-            if (g_isTrackingTime)
-            {
-                KillTimer(hWnd, TIMER_TRACK_ID);
-                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
-            }
+            UpdateTimer();
             break;
         case IDM_POLLING_10SEC:
             g_pollingInterval = 10000;
-            if (g_isTrackingTime)
-            {
-                KillTimer(hWnd, TIMER_TRACK_ID);
-                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
-            }
+            UpdateTimer();
             break;
         case IDM_POLLING_60SEC:
             g_pollingInterval = 60000;
-            if (g_isTrackingTime)
-            {
-                KillTimer(hWnd, TIMER_TRACK_ID);
-                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
-            }
+            UpdateTimer();
             break;
         case IDM_POLLING_10MIN:
             g_pollingInterval = 600000;
-            if (g_isTrackingTime)
-            {
-                KillTimer(hWnd, TIMER_TRACK_ID);
-                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
-            }
+            UpdateTimer();
             break;
         case IDM_LOGS_FOLDER:
             {
@@ -1859,11 +1839,8 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
         if (drawItemStruct->CtlID == IDC_RAW_TIME_ENTRY_LIST)
         {
-            if (drawItemStruct->itemID == -1)
-                break;
-
             size_t index = (size_t)drawItemStruct->itemID;
-            if (index >= g_timeEntries.size())
+            if (index >= g_timeEntries.size()) // This also covers the case of itemID == -1, since size_t(-1) is a very large number.
                 break;
 
             const TimeEntry& entry = g_timeEntries[index];
@@ -1874,10 +1851,6 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             HBRUSH backgroundBrush = CreateSolidBrush(colorBackground);
             FillRect(drawItemStruct->hDC, &drawItemStruct->rcItem, backgroundBrush);
             DeleteObjectAndNullify(backgroundBrush);
-
-            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
-            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
-            SetTextColor(drawItemStruct->hDC, colorText);
 
             RECT textRect = drawItemStruct->rcItem;
             textRect.left += 5;
@@ -1893,8 +1866,10 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 text = text.substr(0, 252) + L"...";
             }
 
-            DrawText(drawItemStruct->hDC, text.c_str(), -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
-
+            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
+            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
+            SetTextColor(drawItemStruct->hDC, colorText);
+            DrawText(drawItemStruct->hDC, text.c_str(), int(text.size()), &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
             SelectObject(drawItemStruct->hDC, oldFont);
 
             if (drawItemStruct->itemState & ODS_FOCUS)
@@ -1904,11 +1879,8 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         }
         else if (drawItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
         {
-            if (drawItemStruct->itemID == -1)
-                break;
-
             size_t index = (size_t)drawItemStruct->itemID;
-            if (index >= g_aggregatedEntries.size())
+            if (index >= g_aggregatedEntries.size()) // This also covers the case of itemID == -1, since size_t(-1) is a very large number.
                 break;
 
             const AggregatedTimeEntry& entry = g_aggregatedEntries[index];
@@ -1926,7 +1898,6 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
             RECT textRect = drawItemStruct->rcItem;
             textRect.left += 5;
-            textRect.top += 3;
 
             // Format: "duration (percentage%) - ProcessName"
             WCHAR buffer[256];
@@ -1954,12 +1925,13 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
     }
     break;
 
+    // The default height is just slightly tight, which might have worked well for 1990's VGA era monitors.
     case WM_MEASUREITEM:
     {
         LPMEASUREITEMSTRUCT measureItemStruct = (LPMEASUREITEMSTRUCT)lParam;
         if (measureItemStruct->CtlID == IDC_RAW_TIME_ENTRY_LIST || measureItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
         {
-            measureItemStruct->itemHeight = 20; // Single line height
+            measureItemStruct->itemHeight += 4; // Pad single line height.
         }
     }
     break;
