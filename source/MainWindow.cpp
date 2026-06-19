@@ -462,7 +462,7 @@ void ResizeControls(HWND hWnd)
     ShowWindow(g_hwndLabelEmptyState, allHidden ? SW_SHOW : SW_HIDE);
 }
 
-void UpdateTimer()
+void UpdateTrackingTimer()
 {
     if (g_isTrackingTime && !g_isUserAway)
     {
@@ -489,7 +489,7 @@ void StartTracking(HWND hWnd)
     {
         g_isTrackingTime = true;
         SetFileModifiedState(true);
-        UpdateTimer();
+        UpdateTrackingTimer();
 
         // Capture foreground window changes, which can be a finer granularity than the polling timer.
         g_hWinEventHook = SetWinEventHook(
@@ -521,7 +521,7 @@ void StopTracking(HWND hWnd, bool noUiUpdates)
     if (g_isTrackingTime)
     {
         g_isTrackingTime = false;
-        UpdateTimer();
+        UpdateTrackingTimer();
         DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
 
         // Finalize the tail end of the entries with the final time.
@@ -546,7 +546,7 @@ void PauseTrackingBecauseAway(HWND hWnd)
     g_isUserAway = true;
     if (g_isTrackingTime)
     {
-        UpdateTimer();
+        UpdateTrackingTimer();
         RecordInactiveState();
         RefreshUI();
     }
@@ -557,7 +557,7 @@ void ResumeTrackingBecauseBack(HWND hWnd)
     g_isUserAway = false;
     if (g_isTrackingTime)
     {
-        UpdateTimer();
+        UpdateTrackingTimer();
         if (!g_timeEntries.empty())
         {
             TimeEntry& lastEntry = g_timeEntries.back();
@@ -1706,7 +1706,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         // If window was restored from minimized and we have pending UI updates, refresh now.
         if (wParam == SIZE_RESTORED || wParam == SIZE_MAXIMIZED)
         {
-            UpdateTimer(); // Restore the timer to normal frequency.
+            UpdateTrackingTimer(); // Restore the timer to normal frequency.
             if (g_needsUIRefresh)
             {
                 RefreshUI();
@@ -1714,7 +1714,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         }
         else if (wParam == SIZE_MINIMIZED)
         {
-            UpdateTimer(); // Throttle the timer when minimized to reduce CPU usage.
+            UpdateTrackingTimer(); // Throttle the timer when minimized to reduce CPU usage.
         }
         break;
 
@@ -1857,19 +1857,19 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             break;
         case IDM_POLLING_1SEC:
             g_pollingInterval = 1000;
-            UpdateTimer();
+            UpdateTrackingTimer();
             break;
         case IDM_POLLING_10SEC:
             g_pollingInterval = 10000;
-            UpdateTimer();
+            UpdateTrackingTimer();
             break;
         case IDM_POLLING_60SEC:
             g_pollingInterval = 60000;
-            UpdateTimer();
+            UpdateTrackingTimer();
             break;
         case IDM_POLLING_10MIN:
             g_pollingInterval = 600000;
-            UpdateTimer();
+            UpdateTrackingTimer();
             break;
         case IDM_LOGS_FOLDER:
             {
@@ -1998,7 +1998,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         }
         DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
         WTSUnRegisterSessionNotification(hWnd);
-        UpdateTimer();
+        UpdateTrackingTimer();
 
         DeleteObjectAndNullify(g_hLabelFont);
         DeleteObjectAndNullify(g_hTimerFont);
