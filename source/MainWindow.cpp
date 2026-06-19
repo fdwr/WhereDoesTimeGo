@@ -1602,13 +1602,13 @@ bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
     SystemTimeToFileTime(&time1, &fileTime1);
     SystemTimeToFileTime(&time2, &fileTime2);
 
-    ULARGE_INTEGER uli1, uli2;
-    uli1.LowPart  = fileTime1.dwLowDateTime;
-    uli1.HighPart = fileTime1.dwHighDateTime;
-    uli2.LowPart  = fileTime2.dwLowDateTime;
-    uli2.HighPart = fileTime2.dwHighDateTime;
+    ULARGE_INTEGER largeInt1, largeInt2;
+    largeInt1.LowPart  = fileTime1.dwLowDateTime;
+    largeInt1.HighPart = fileTime1.dwHighDateTime;
+    largeInt2.LowPart  = fileTime2.dwLowDateTime;
+    largeInt2.HighPart = fileTime2.dwHighDateTime;
 
-    return uli1.QuadPart >= uli2.QuadPart;
+    return largeInt1.QuadPart >= largeInt2.QuadPart;
 }
 
 std::wstring FormatTime(const SYSTEMTIME& time)
