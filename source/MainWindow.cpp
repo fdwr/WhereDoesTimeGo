@@ -47,6 +47,9 @@ struct TimeEntry
     SYSTEMTIME startTime;
     SYSTEMTIME endTime;
     DWORD durationSeconds;
+
+    void ResetStartAndEndTimeToNow();
+    void SetEndTimeToNow(); // Wrap up this entry by setting the end time to now and calculating the duration.
 };
 
 struct AggregatedTimeEntry
@@ -529,11 +532,7 @@ void StopTracking(HWND hWnd, bool noUiUpdates)
         if (!g_timeEntries.empty())
         {
             SetFileModifiedState(true);
-            GetSystemTime(&g_timeEntries.back().endTime);
-            g_timeEntries.back().durationSeconds = CalculateDurationInSeconds(
-                g_timeEntries.back().startTime,
-                g_timeEntries.back().endTime
-            );
+            g_timeEntries.back().SetEndTimeToNow();
         }
 
         if (!noUiUpdates)
@@ -563,6 +562,11 @@ void ResumeTrackingBecauseBack(HWND hWnd)
     if (g_isTrackingTime)
     {
         UpdateTimer();
+        if (!g_timeEntries.empty())
+        {
+            TimeEntry& lastEntry = g_timeEntries.back();
+            lastEntry.SetEndTimeToNow();
+        }
         RecordActiveWindowDetails();
         RefreshUI();
     }
@@ -634,48 +638,39 @@ void RecordActiveWindowDetails()
 
         if (lastEntry.processName == processName && WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
         {
-            GetSystemTime(&lastEntry.endTime);
-            lastEntry.durationSeconds = CalculateDurationInSeconds(lastEntry.startTime, lastEntry.endTime);
-
+            // Continue the previous entry since it's the same window.
+            lastEntry.SetEndTimeToNow();
             return;
         }
         // Different window. So fall through to add a new entry...
     }
 
-    SYSTEMTIME now;
-    GetSystemTime(&now);
-    TimeEntry entry =
+    TimeEntry newEntry =
     {
         .windowTitle = windowTitle,
         .processName = processName,
-        .startTime = now,
-        .endTime = now,
         .durationSeconds = 0,
     };
+    newEntry.ResetStartAndEndTimeToNow();
 
-    g_timeEntries.push_back(std::move(entry));
+    g_timeEntries.push_back(std::move(newEntry));
 }
 
 void RecordInactiveState()
 {
     if (!g_timeEntries.empty())
     {
-        GetSystemTime(&g_timeEntries.back().endTime);
-        g_timeEntries.back().durationSeconds = CalculateDurationInSeconds(
-            g_timeEntries.back().startTime,
-            g_timeEntries.back().endTime
-        );
+        g_timeEntries.back().SetEndTimeToNow();
     }
 
-    TimeEntry entry = {};
-    entry.windowTitle = L"Away";
-    entry.processName = L"Away";
+    TimeEntry newEntry =
+    {
+        .windowTitle = L"Away",
+        .processName = L"Away",
+    };
+    newEntry.ResetStartAndEndTimeToNow();
 
-    GetSystemTime(&entry.startTime);
-    entry.endTime = entry.startTime;
-    entry.durationSeconds = 0;
-
-    g_timeEntries.push_back(entry);
+    g_timeEntries.push_back(std::move(newEntry));
     SetFileModifiedState(true);
 }
 
@@ -1494,12 +1489,12 @@ void DeleteSelectedEntries()
 void InsertEntry(HWND hWnd)
 {
     // Create a new temporary entry with current time.
-    TimeEntry tempEntry = {};
-    GetSystemTime(&tempEntry.startTime);
-    tempEntry.endTime = tempEntry.startTime;
-    tempEntry.windowTitle = L"";
-    tempEntry.processName = L"";
-    tempEntry.durationSeconds = 0;
+    TimeEntry tempEntry =
+    {
+        .windowTitle = L"",
+        .processName = L"",
+    };
+    tempEntry.ResetStartAndEndTimeToNow();
 
     // Append temporary entry to the end.
     g_timeEntries.push_back(tempEntry);
@@ -1575,6 +1570,19 @@ void EditSelectedEntry(HWND hWnd)
     }
 }
 
+void TimeEntry::ResetStartAndEndTimeToNow()
+{
+    GetSystemTime(&startTime);
+    endTime = startTime;
+    durationSeconds = 0;
+}
+
+void TimeEntry::SetEndTimeToNow()
+{
+    GetSystemTime(&endTime);
+    durationSeconds = CalculateDurationInSeconds(startTime, endTime);
+}
+
 DWORD CalculateDurationInSeconds(const SYSTEMTIME& timeStart, const SYSTEMTIME& timeEnd)
 {
     FILETIME fileTimeStart, fileTimeEnd;
@@ -1613,12 +1621,16 @@ bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
 
 std::wstring FormatTime(const SYSTEMTIME& time)
 {
+    // Convert UTC time to local time for display
+    SYSTEMTIME localTime;
+    SystemTimeToTzSpecificLocalTime(nullptr, &time, &localTime);
+
     WCHAR buffer[64];
     swprintf_s(
         buffer,
         L"%04d-%02d-%02d %02d:%02d:%02d",
-        time.wYear, time.wMonth, time.wDay,
-        time.wHour, time.wMinute, time.wSecond
+        localTime.wYear, localTime.wMonth, localTime.wDay,
+        localTime.wHour, localTime.wMinute, localTime.wSecond
     );
     return buffer;
 }
