@@ -1,0 +1,11 @@
+The icon making process:
+- Download Visual Studio 2026 Image Library:
+  - https://learn.microsoft.com/en-us/visualstudio/designers/the-visual-studio-image-library?view=visualstudio
+  - https://www.microsoft.com/en-us/download/details.aspx?id=35825
+  - Extract: OpenFile.svg, Save.svg, SaveAs.svg, Edit.svg, RemoveCommand.svg
+- Convert to 32x32 via LunaSvgTest (https://github.com/fdwr/LunaSvgSampleTest). Copy to clipboard:
+- Paste into Aseprite. Export to PNG.
+- Convert to 32-BPP Bitmap using XnView 2021 (not IrfanView which doesn't don't preserve
+  the alpha channel correctly), nor GIMP which causes LoadImage to fail. Exporting directly
+  via LunaSvgTest to BMP also works, but the colors are slightly off because of premultiplied
+  alpha issues. So XnView is the best option.

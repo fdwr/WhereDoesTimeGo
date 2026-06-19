@@ -1,0 +1,234 @@
+﻿//Microsoft Visual C++ generated resource script.
+//
+#include "Resource.h"
+
+#define APSTUDIO_READONLY_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE resource.
+//
+#ifndef APSTUDIO_INVOKED
+#include <SDKDDKVer.h>
+#endif
+#define APSTUDIO_HIDDEN_SYMBOLS
+#include "windows.h"
+#undef APSTUDIO_HIDDEN_SYMBOLS
+/////////////////////////////////////////////////////////////////////////////
+#undef APSTUDIO_READONLY_SYMBOLS
+
+#if !defined(AFX_RESOURCE_DLL) || defined(AFX_TARG_ENU)
+LANGUAGE 9, 1
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Icon
+//
+
+// Icon with lowest ID value placed first to ensure application icon
+// remains consistent on all systems.
+
+IDI_WHEREDOESTIMEGO         ICON        "program.ico"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Bitmap
+//
+
+IDB_TOOLBAR                 BITMAP      "toolbar-icons.bmp"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Manifest
+//
+
+1                           RT_MANIFEST "MainWindow.manifest"
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Menu
+//
+
+IDC_WHEREDOESTIMEGO MENU
+BEGIN
+    POPUP "&File"
+    BEGIN
+        MENUITEM "&New\tCtrl+N",        IDM_NEW
+        MENUITEM "&Open...\tCtrl+O",    IDM_OPEN
+        MENUITEM "&Merge...",           IDM_MERGE
+        MENUITEM "&Save\tCtrl+S",       IDM_SAVE
+        MENUITEM "Save &As...\tCtrl+Alt+S", IDM_SAVEAS
+        MENUITEM SEPARATOR
+        MENUITEM "Save on E&xit",       IDM_SAVE_ON_EXIT
+        MENUITEM SEPARATOR
+        MENUITEM "E&xit",               IDM_EXIT
+    END
+    POPUP "&Edit"
+    BEGIN
+        MENUITEM "&Insert Entry...",    IDM_INSERT
+        MENUITEM "&Edit Selected\tF2",  IDM_EDIT
+        MENUITEM "&Delete Selected\tDel", IDM_DELETE
+        MENUITEM "&Clear All Entries",  IDM_CLEAR_ENTRIES
+    END
+    POPUP "&Track"
+    BEGIN
+        MENUITEM "&Start Tracking\tEnter", IDM_START
+        MENUITEM "S&top Tracking\tEscape", IDM_STOP
+        MENUITEM "Add &Lap",            IDM_LAP
+        MENUITEM SEPARATOR
+        POPUP "Polling &Frequency"
+        BEGIN
+            MENUITEM "1 Second",        IDM_POLLING_1SEC
+            MENUITEM "10 Seconds",      IDM_POLLING_10SEC
+            MENUITEM "60 Seconds",      IDM_POLLING_60SEC
+            MENUITEM "10 Minutes",      IDM_POLLING_10MIN
+        END
+    END
+    POPUP "&View"
+    BEGIN
+        MENUITEM "Show Time &Entries",  IDM_SHOW_TIME_ENTRIES
+        MENUITEM "Show &Pie Chart",     IDM_SHOW_PIE_CHART
+        MENUITEM "Show &Timer",         IDM_SHOW_TIMER
+        MENUITEM SEPARATOR
+        MENUITEM "Show &Away Time",     IDM_SHOW_AWAY_TIME
+        MENUITEM "&Show WhereDoesTimeGo.exe", IDM_SHOW_SELF
+    END
+    POPUP "&Help"
+    BEGIN
+        MENUITEM "&About ...",          IDM_ABOUT
+    END
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Accelerator
+//
+
+IDC_WHEREDOESTIMEGO ACCELERATORS
+BEGIN
+    "?",            IDM_ABOUT,                  ASCII,  ALT
+    "/",            IDM_ABOUT,                  ASCII,  ALT
+    "N",            IDM_NEW,                    VIRTKEY, CONTROL
+    "O",            IDM_OPEN,                   VIRTKEY, CONTROL
+    "S",            IDM_SAVE,                   VIRTKEY, CONTROL
+    "S",            IDM_SAVEAS,                 VIRTKEY, CONTROL, ALT
+    VK_ESCAPE,      IDM_STOP,                   VIRTKEY
+    VK_RETURN,      IDM_START,                  VIRTKEY
+    VK_F5,          IDM_START,                  VIRTKEY
+    VK_F8,          IDM_STOP,                   VIRTKEY
+    VK_F2,          IDM_EDIT,                   VIRTKEY
+    VK_DELETE,      IDM_DELETE,                 VIRTKEY
+END
+
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// Dialog
+//
+
+IDD_ABOUTBOX DIALOGEX 0, 0, 200, 100
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "About WhereDoesTimeGo"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    ICON            IDI_WHEREDOESTIMEGO,IDC_STATIC,14,14,21,20
+    LTEXT           "WhereDoesTimeGo, Version 1.0\r\nCopyright (c) 2026-06-17 Dwayne Robinson\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.",IDC_STATIC,42,14,160,48,SS_NOPREFIX
+    DEFPUSHBUTTON   "OK",IDOK,75,76,50,14,WS_GROUP
+END
+
+IDD_EDITENTRY DIALOGEX 0, 0, 280, 110
+STYLE DS_SETFONT | DS_MODALFRAME | DS_FIXEDSYS | WS_POPUP | WS_CAPTION | WS_SYSMENU
+CAPTION "Edit Time Entry"
+FONT 8, "MS Shell Dlg"
+BEGIN
+    ICON            IDI_WHEREDOESTIMEGO,IDC_STATIC,7,7,21,20
+    RTEXT           "Process:",IDC_STATIC,30,10,45,8
+    EDITTEXT        IDC_EDIT_PROCESS,80,7,193,14,ES_AUTOHSCROLL
+    RTEXT           "Window:",IDC_STATIC,30,30,45,8
+    EDITTEXT        IDC_EDIT_TITLE,80,27,193,14,ES_AUTOHSCROLL
+    RTEXT           "Start Time:",IDC_STATIC,30,50,45,8
+    CONTROL         "",IDC_DATETIME_START,"SysDateTimePick32",DTS_RIGHTALIGN | DTS_UPDOWN | WS_TABSTOP,80,47,120,14
+    RTEXT           "End Time:",IDC_STATIC,30,70,45,8
+    CONTROL         "",IDC_DATETIME_END,"SysDateTimePick32",DTS_RIGHTALIGN | DTS_UPDOWN | WS_TABSTOP,80,67,120,14
+    DEFPUSHBUTTON   "OK",IDOK,169,89,50,14
+    PUSHBUTTON      "Cancel",IDCANCEL,223,89,50,14
+END
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// DESIGNINFO
+//
+
+#ifdef APSTUDIO_INVOKED
+GUIDELINES DESIGNINFO
+BEGIN
+    IDD_ABOUTBOX, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 163
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 55
+    END
+    IDD_EDITENTRY, DIALOG
+    BEGIN
+        LEFTMARGIN, 7
+        RIGHTMARGIN, 273
+        TOPMARGIN, 7
+        BOTTOMMARGIN, 103
+    END
+END
+#endif    // APSTUDIO_INVOKED
+
+#ifdef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// TEXTINCLUDE
+//
+1 TEXTINCLUDE
+BEGIN
+    "Resource.h\0"
+END
+
+2 TEXTINCLUDE
+BEGIN
+    "#ifndef APSTUDIO_INVOKED\r\n"
+    "#include ""targetver.h""\r\n"
+    "#endif\r\n"
+    "#define APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "#include ""windows.h""\r\n"
+    "#undef APSTUDIO_HIDDEN_SYMBOLS\r\n"
+    "\0"
+END
+
+3 TEXTINCLUDE
+BEGIN
+    "\r\n"
+    "\0"
+END
+
+#endif    // APSTUDIO_INVOKED
+
+/////////////////////////////////////////////////////////////////////////////
+//
+// String Table
+//
+
+STRINGTABLE
+BEGIN
+   IDC_WHEREDOESTIMEGO   "WHEREDOESTIMEGO"
+   IDS_APP_TITLE       "WhereDoesTimeGo"
+END
+
+#endif
+/////////////////////////////////////////////////////////////////////////////
+
+
+
+#ifndef APSTUDIO_INVOKED
+/////////////////////////////////////////////////////////////////////////////
+//
+// Generated from the TEXTINCLUDE resource.
+//
+
+/////////////////////////////////////////////////////////////////////////////
+#endif    // not APSTUDIO_INVOKED

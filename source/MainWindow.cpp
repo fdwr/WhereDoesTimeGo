@@ -1,0 +1,2154 @@
+﻿// MainWindow
+
+#include "Precomp.h"
+#include "MainWindow.h"
+
+#define MAX_LOADSTRING 100
+#define TIMER_TRACK_ID 1
+#define DEFAULT_POLLING_INTERVAL 10 * 1000 // every 10 seconds.
+
+namespace ToolbarIcon
+{
+    enum ToolbarIcon
+    {
+        NewFile,
+        OpenFile,
+        MergeFile,
+        SaveFile,
+        SaveFileAs,
+        EditTimeEntry,
+        InsertTimeEntry,
+        DeleteTimeEntry,
+        ClearTimeEntries,
+        StartTimeTracking,
+        LapTimeTracking,
+        StopTimeTracking,
+        ShowTimeEntries,
+        ShowPieChart,
+        ShowTimer,
+        LogsFolder,
+    };
+}
+
+namespace TimeTrackingMode
+{
+    enum TimeTrackingMode
+    {
+        ActiveWindow,       // Keep track of the active window and its process.
+        ManualCategories,   // Record time in user-defined categories, without tracking specific windows or processes.
+        Timer,              // Simple timer mode where categories are hidden, you see a large timer.
+    };
+}
+
+struct TimeEntry
+{
+    std::wstring windowTitle;
+    std::wstring processName;
+    SYSTEMTIME startTime;
+    SYSTEMTIME endTime;
+    DWORD durationSeconds;
+};
+
+struct AggregatedTimeEntry
+{
+    std::wstring processName;
+    DWORD totalSeconds;
+    float percentage;
+};
+
+// Global Variables:
+HINSTANCE g_instanceHandle;
+WCHAR g_defaultWindowTitle[MAX_LOADSTRING];
+WCHAR g_windowClassName[MAX_LOADSTRING];
+
+HWND g_hWndMainWindow = nullptr;
+HWND g_hWndToolbar = nullptr;
+HWND g_hwndTimeEntriesList = nullptr;
+HWND g_hwndAggregatedTimeEntriesList = nullptr;
+HWND g_hwndPieChart = nullptr;
+HWND g_hwndTimerDisplay = nullptr;
+HWND g_hwndLabelTimeEntries = nullptr;
+HWND g_hwndLabelTasks = nullptr;
+HWND g_hwndLabelEmptyState = nullptr;
+HWND g_hwndLastFocus = nullptr;
+HWINEVENTHOOK g_hWinEventHook = nullptr;
+
+bool g_isTrackingTime = false;
+bool g_isUserAway = false;
+bool g_needsUIRefresh = false;
+bool g_showTimeEntries = true;
+bool g_showPieChart = true;
+bool g_showTimer = true;
+bool g_saveOnExit = false;
+bool g_showAwayTime = true;
+bool g_showSelf = true;
+int g_pollingInterval = DEFAULT_POLLING_INTERVAL;
+std::vector<TimeEntry> g_timeEntries;
+std::vector<AggregatedTimeEntry> g_aggregatedEntries;
+
+std::wstring g_timeEntriesFilePath;
+bool g_timeEntriesAreModified = false;
+
+ULONG_PTR g_gdiplusToken = 0;
+HFONT g_hLabelFont = nullptr;
+HFONT g_hTimerFont = nullptr;
+HFONT g_hMegaTimerFont = nullptr;
+int g_editingEntryIndex = -1;
+
+ATOM MyRegisterClass(HINSTANCE hInstance);
+BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow);
+LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+void WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+
+void CreateControls(HWND hWnd);
+void ResizeControls(HWND hWnd);
+
+void StartTracking(HWND hWnd);
+void StopTracking(HWND hWnd, bool noUiUpdates = false);
+void PauseTrackingBecauseAway(HWND hWnd);
+void ResumeTrackingBecauseBack(HWND hWnd);
+void RecalculateAggregatedData();
+void UpdateTimeEntriesList();
+void UpdateAggregatedTimeEntriesList();
+void UpdateTimerDisplay();
+void RefreshUI();
+void SelectLastItemInRawList();
+
+void RecordActiveWindowDetails();
+void RecordInactiveState();
+std::wstring GetProcessName(HWND hWnd);
+void UpdateWindowTitle();
+void SetTimeEntriesFilePath(const std::wstring& filePath);
+void SetFileModifiedState(bool isModified);
+
+void DrawPieChart(HDC hdc, RECT& rect);
+
+bool WriteTextFile(const WCHAR* filename, std::wstring_view content);
+bool ReadTextFile(const WCHAR* filename, std::wstring& outContent);
+bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& outEntries);
+void SortTimeEntriesByTime();
+std::wstring GetSettingsPath(bool createPath = false, bool addFileName = true);
+void NewFile(HWND hWnd);
+void LoadFromCSV(HWND hWnd);
+void MergeFromCSV(HWND hWnd);
+void SaveToCSV(HWND hWnd);
+void SaveAsToCSV(HWND hWnd);
+void SaveToCSV(HWND hwnd, const wchar_t* filePath);
+void LoadSettings();
+void SaveSettings();
+
+void EditSelectedEntry(HWND hWnd);
+void InsertEntry(HWND hWnd);
+void AddLapEntry(HWND hWnd);
+void DeleteSelectedEntries();
+void ClearAllEntries(HWND hWnd);
+
+DWORD CalculateDurationInSeconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
+std::wstring FormatTime(const SYSTEMTIME& time);
+std::wstring FormatDuration(DWORD seconds);
+
+int APIENTRY wWinMain(
+    _In_ HINSTANCE hInstance,
+    _In_opt_ HINSTANCE hPrevInstance,
+    _In_ LPWSTR lpCmdLine,
+    _In_ int nCmdShow
+    )
+{
+    UNREFERENCED_PARAMETER(hPrevInstance);
+    UNREFERENCED_PARAMETER(lpCmdLine);
+
+    Gdiplus::GdiplusStartupInput gdiplusStartupInput;
+    Gdiplus::GdiplusStartup(&g_gdiplusToken, &gdiplusStartupInput, nullptr);
+
+    LoadStringW(hInstance, IDS_APP_TITLE, g_defaultWindowTitle, MAX_LOADSTRING);
+    LoadStringW(hInstance, IDC_WHEREDOESTIMEGO, g_windowClassName, MAX_LOADSTRING);
+    MyRegisterClass(hInstance);
+
+    LoadSettings();
+    if (!InitalizeInstance(hInstance, nCmdShow))
+    {
+        return FALSE;
+    }
+
+    HACCEL hAccelTable = LoadAccelerators(hInstance, MAKEINTRESOURCE(IDC_WHEREDOESTIMEGO));
+
+    MSG msg;
+    while (GetMessage(&msg, nullptr, 0, 0))
+    {
+        HWND hWndParent = GetParent(msg.hwnd);
+        if (!TranslateAccelerator(g_hWndMainWindow, hAccelTable, &msg))
+        {
+            if (!IsDialogMessage(hWndParent, &msg)) // Dispatch tab keypresses.
+            {
+                TranslateMessage(&msg);
+                DispatchMessage(&msg);
+            }
+        }
+    }
+
+    SaveSettings();
+    Gdiplus::GdiplusShutdown(g_gdiplusToken);
+
+    return (int)msg.wParam;
+}
+
+ATOM MyRegisterClass(HINSTANCE hInstance)
+{
+    WNDCLASSEXW wcex = {};
+
+    wcex.cbSize = sizeof(WNDCLASSEX);
+    wcex.style = CS_HREDRAW | CS_VREDRAW;
+    wcex.lpfnWndProc = &WindowProcedure;
+    wcex.cbClsExtra = 0;
+    wcex.cbWndExtra = 0;
+    wcex.hInstance = hInstance;
+    wcex.hIcon = LoadIcon(hInstance, MAKEINTRESOURCE(IDI_WHEREDOESTIMEGO));
+    wcex.hCursor = LoadCursor(nullptr, IDC_ARROW);
+    wcex.hbrBackground = (HBRUSH)(COLOR_BTNFACE + 1);
+    wcex.lpszMenuName = MAKEINTRESOURCEW(IDC_WHEREDOESTIMEGO);
+    wcex.lpszClassName = g_windowClassName;
+    wcex.hIconSm = LoadIcon(wcex.hInstance, MAKEINTRESOURCE(IDI_WHEREDOESTIMEGO));
+
+    return RegisterClassExW(&wcex);
+}
+
+BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow)
+{
+    g_instanceHandle = hInstance;
+
+    INITCOMMONCONTROLSEX icex = {};
+    icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
+    icex.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES;
+    InitCommonControlsEx(&icex);
+
+    HWND hWnd = CreateWindowW(g_windowClassName, g_defaultWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 1200, 700, nullptr, nullptr, hInstance, nullptr);
+    g_hWndMainWindow = hWnd;
+
+    if (!hWnd)
+    {
+        return FALSE;
+    }
+
+    // Enable WM_WTSSESSION_CHANGE messages.
+    WTSRegisterSessionNotification(hWnd, NOTIFY_FOR_THIS_SESSION);
+
+    CreateControls(hWnd);
+
+    ShowWindow(hWnd, nCmdShow);
+    UpdateWindow(hWnd);
+
+    return TRUE;
+}
+
+template<typename T, typename Callable>
+void DeleteResourceAndNullify(T& object, Callable F)
+{
+    if (object != nullptr)
+    {
+        F(object);
+        object = nullptr;
+    }
+}
+
+template<typename T>
+void DeleteObjectAndNullify(T& object)
+    requires(
+        std::is_same_v<T, HPEN> ||
+        std::is_same_v<T, HBRUSH> ||
+        std::is_same_v<T, HFONT> ||
+        std::is_same_v<T, HBITMAP> ||
+        std::is_same_v<T, HRGN> ||
+        std::is_same_v<T, HPALETTE>
+    )
+{
+    DeleteResourceAndNullify(object, &DeleteObject);
+}
+
+void CreateControls(HWND hWnd)
+{
+    NONCLIENTMETRICS nonClientMetrics = {};
+    nonClientMetrics.cbSize = sizeof(NONCLIENTMETRICS);
+    SystemParametersInfo(SPI_GETNONCLIENTMETRICS, sizeof(NONCLIENTMETRICS), &nonClientMetrics, 0);
+    g_hLabelFont = CreateFontIndirect(&nonClientMetrics.lfMessageFont);
+
+    // Create large timer font, and an even larger one for timer-only mode.
+    g_hTimerFont = CreateFont(64, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+    g_hMegaTimerFont = CreateFont(180, 0, 0, 0, FW_BOLD, FALSE, FALSE, FALSE, DEFAULT_CHARSET, OUT_DEFAULT_PRECIS, CLIP_DEFAULT_PRECIS, CLEARTYPE_QUALITY, DEFAULT_PITCH | FF_DONTCARE, L"Segoe UI");
+
+    g_hWndToolbar = CreateWindowEx(WS_EX_STATICEDGE, TOOLBARCLASSNAME, nullptr, WS_CHILD | WS_VISIBLE | TBSTYLE_FLAT | TBSTYLE_TOOLTIPS | CCS_TOP | WS_TABSTOP, 0, 0, 0, 0, hWnd, (HMENU)IDC_TOOLBAR, g_instanceHandle, nullptr);
+
+    SendMessage(g_hWndToolbar, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTON), 0);
+
+    // Load the toolbar bitmap and create an image list with alpha support.
+    HBITMAP hBitmap = LoadBitmap(g_instanceHandle, MAKEINTRESOURCE(IDB_TOOLBAR));
+    if (hBitmap)
+    {
+        HIMAGELIST hImageList = ImageList_Create(32, 32, ILC_COLOR32, 7, 0);
+        if (hImageList)
+        {
+            ImageList_Add(hImageList, hBitmap, nullptr);
+            SendMessage(g_hWndToolbar, TB_SETIMAGELIST, 0, (LPARAM)hImageList);
+        }
+        DeleteObject(hBitmap);
+    }
+
+    TBBUTTON toolbarButtons[] =
+    {
+        { ToolbarIcon::NewFile, IDM_NEW, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"New" },
+        { ToolbarIcon::OpenFile, IDM_OPEN, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Open" },
+        { ToolbarIcon::MergeFile, IDM_MERGE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Merge" },
+        { ToolbarIcon::SaveFile, IDM_SAVE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Save" },
+        { ToolbarIcon::SaveFileAs, IDM_SAVEAS, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Save As" },
+        { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
+        { ToolbarIcon::StartTimeTracking, IDM_START_TIME_TRACKING, TBSTATE_ENABLED, BTNS_GROUP, {0}, 0, (INT_PTR)L"Start" },
+        { ToolbarIcon::StopTimeTracking, IDM_STOP_TIME_TRACKING, TBSTATE_ENABLED | TBSTATE_CHECKED, BTNS_GROUP, {0}, 0, (INT_PTR)L"Stop" },
+        { ToolbarIcon::LapTimeTracking, IDM_ADD_LAP_ENTRY, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Lap" },
+        { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
+        { ToolbarIcon::EditTimeEntry, IDM_EDIT, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Edit" },
+        { ToolbarIcon::InsertTimeEntry, IDM_INSERT, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Insert" },
+        { ToolbarIcon::DeleteTimeEntry, IDM_DELETE, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Delete" },
+        { ToolbarIcon::ClearTimeEntries, IDM_CLEAR_ENTRIES, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Clear" },
+        { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
+        { ToolbarIcon::ShowTimeEntries, IDM_SHOW_TIME_ENTRIES, BYTE(TBSTATE_ENABLED | (g_showTimeEntries ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Entries" },
+        { ToolbarIcon::ShowPieChart, IDM_SHOW_PIE_CHART, BYTE(TBSTATE_ENABLED | (g_showPieChart ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Pie Chart" },
+        { ToolbarIcon::ShowTimer, IDM_SHOW_TIMER, BYTE(TBSTATE_ENABLED | (g_showTimer ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Timer" },
+        { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
+        { ToolbarIcon::LogsFolder, IDM_LOGS_FOLDER, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Logs" },
+    };
+
+    SendMessage(g_hWndToolbar, TB_ADDBUTTONS, sizeof(toolbarButtons) / sizeof(TBBUTTON), (LPARAM)&toolbarButtons);
+
+    // Create labels
+    g_hwndLabelTimeEntries = CreateWindowEx(0, L"STATIC", L"Time Entries:", WS_CHILD | WS_VISIBLE | SS_LEFT, 10, 50, 300, 20, hWnd, (HMENU)IDC_LABEL_TIME_ENTRIES, g_instanceHandle, nullptr);
+    g_hwndLabelTasks = CreateWindowEx(0, L"STATIC", L"Tasks:", WS_CHILD | WS_VISIBLE | SS_LEFT, 320, 50, 300, 20, hWnd, (HMENU)IDC_LABEL_TASKS, g_instanceHandle, nullptr);
+    g_hwndTimeEntriesList = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTBOX, nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_EXTENDEDSEL | LBS_MULTIPLESEL | LBS_NOINTEGRALHEIGHT | LBS_NODATA | WS_TABSTOP, 10, 70, 300, 480, hWnd, (HMENU)IDC_RAW_TIME_ENTRY_LIST, g_instanceHandle, nullptr);
+    g_hwndAggregatedTimeEntriesList = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTBOX, nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_NODATA | WS_TABSTOP, 320, 70, 300, 480, hWnd, (HMENU)IDC_AGGREGATED_TIME_ENTRY_LIST, g_instanceHandle, nullptr);
+    g_hwndPieChart = CreateWindowEx(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, 630, 50, 500, 500, hWnd, (HMENU)IDC_PIECHART, g_instanceHandle, nullptr);
+    g_hwndTimerDisplay = CreateWindowEx(0, L"STATIC", L"00h 00m 00s", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE , 630, 550, 500, 60, hWnd, (HMENU)IDC_TIMER_DISPLAY, g_instanceHandle, nullptr);
+    g_hwndLabelEmptyState = CreateWindowEx(0, L"STATIC", L"Click View / Show Entries, Pie Chart, or Timer to see them\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.", WS_CHILD | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)IDC_LABEL_EMPTY_STATE, g_instanceHandle, nullptr);
+
+    if (g_hLabelFont)
+    {
+        SendMessage(g_hwndLabelTimeEntries, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+        SendMessage(g_hwndLabelTasks, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+        SendMessage(g_hwndTimeEntriesList, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+        SendMessage(g_hwndAggregatedTimeEntriesList, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+        SendMessage(g_hwndLabelEmptyState, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
+    }
+
+    if (g_hTimerFont)
+    {
+        SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hTimerFont, TRUE);
+    }
+}
+
+void ResizeControls(HWND hWnd)
+{
+    RECT clientRect;
+    GetClientRect(hWnd, &clientRect);
+
+    SendMessage(g_hWndToolbar, TB_AUTOSIZE, 0, 0);
+    RECT toolbarRect;
+    GetWindowRect(g_hWndToolbar, &toolbarRect);
+    int toolbarHeight = toolbarRect.bottom - toolbarRect.top;
+
+    int spacing = 8;
+    int labelHeight = 20;
+    int timerHeight = 60;
+    int topMargin = toolbarHeight + spacing;
+    int bottomMargin = spacing;
+    int leftMargin = spacing;
+    int rightMargin = spacing;
+
+    int availableWidth = clientRect.right - leftMargin - rightMargin;
+    int availableHeight = clientRect.bottom - topMargin - bottomMargin - labelHeight - spacing;
+
+    // Check if only timer is visible.
+    bool onlyTimerVisible = g_showTimer && !g_showTimeEntries && !g_showPieChart;
+
+    if (g_showTimer)
+    {
+        // Timer-only mode hides everything else and shows timer at full size.
+        if (onlyTimerVisible)
+        {
+            // Use mega font for timer-only mode.
+            // Position timer to fill entire available area.
+            SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hMegaTimerFont, TRUE);
+            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, topMargin, availableWidth, availableHeight + labelHeight + spacing, SWP_NOZORDER | SWP_NOCOPYBITS);
+        }
+        else
+        {
+            // Use normal font if in normal mode.
+            SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hTimerFont, TRUE);
+        }
+    }
+
+    int currentX = leftMargin;
+    int listTopMargin = topMargin + labelHeight + 2;
+    int listHeight = availableHeight;
+
+    // Reserve space for timer at bottom if showing timer without pie chart.
+    if (g_showTimer && !g_showPieChart && g_showTimeEntries)
+    {
+        listHeight -= (timerHeight + spacing);
+    }
+
+    // Show/hide and position time entries (raw and aggregated lists).
+    if (g_showTimeEntries)
+    {
+        int singleListWidth = g_showPieChart ? (availableWidth / 4) : (availableWidth / 2 - spacing / 2);
+
+        SetWindowPos(g_hwndLabelTimeEntries, nullptr, currentX, topMargin, singleListWidth, labelHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, singleListWidth, listHeight, SWP_NOZORDER);
+        currentX += singleListWidth + spacing;
+
+        SetWindowPos(g_hwndLabelTasks, nullptr, currentX, topMargin, singleListWidth, labelHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, listTopMargin, singleListWidth, listHeight, SWP_NOZORDER);
+        currentX += singleListWidth + spacing;
+    }
+
+    // Show/hide and position pie chart and timer.
+    if (g_showPieChart)
+    {
+        int pieChartWidth = availableWidth - (currentX - leftMargin);
+        int pieChartHeight = availableHeight + labelHeight + 2;
+
+        if (g_showTimer)
+        {
+            pieChartHeight -= (timerHeight + spacing);
+        }
+
+        SetWindowPos(g_hwndPieChart, nullptr, currentX, topMargin, pieChartWidth, pieChartHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
+
+        if (g_showTimer)
+        {
+            int timerTop = topMargin + pieChartHeight + spacing;
+            SetWindowPos(g_hwndTimerDisplay, nullptr, currentX, timerTop, pieChartWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
+        }
+    }
+    else
+    {
+        // Show timer below lists if visible (stretching full width).
+        if (g_showTimer && g_showTimeEntries)
+        {
+            int timerTop = listTopMargin + listHeight + spacing;
+            int timerWidth = availableWidth - (currentX - leftMargin);
+            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, timerTop, availableWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
+        }
+    }
+
+    // Show/hide empty state message.
+    bool allHidden = !g_showTimeEntries && !g_showPieChart && !g_showTimer;
+    if (allHidden)
+    {
+        // Center the empty state label. Unfortunately SS_CENTERIMAGE only works with single lines. So, estimate here.
+        int labelWidth = 400;
+        int labelHeight = 100;
+        int labelX = (clientRect.right - labelWidth) / 2;
+        int labelY = (clientRect.bottom - topMargin - labelHeight) / 2 + topMargin;
+        SetWindowPos(g_hwndLabelEmptyState, nullptr, labelX, labelY, labelWidth, labelHeight, SWP_NOZORDER);
+    }
+
+    ShowWindow(g_hwndLabelTimeEntries, g_showTimeEntries ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndLabelTasks, g_showTimeEntries ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndTimeEntriesList, g_showTimeEntries ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndAggregatedTimeEntriesList, g_showTimeEntries ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndPieChart, g_showPieChart ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndTimerDisplay, g_showTimer ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndLabelEmptyState, allHidden ? SW_SHOW : SW_HIDE);
+}
+
+void UpdateTimer()
+{
+    if (g_isTrackingTime && !g_isUserAway)
+    {
+        // If the window is active (and not minimized), update every second for more real-time accuracy.
+        // If minimized, update less frequently to save resources, since the user can't see the updates anyway.
+        if (IsIconic(g_hWndMainWindow))
+        {
+            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+        }
+        else
+        {
+            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, 1000, nullptr);
+        }
+    }
+    else
+    {
+        KillTimer(g_hWndMainWindow, TIMER_TRACK_ID);
+    }
+}
+
+void StartTracking(HWND hWnd)
+{
+    if (!g_isTrackingTime)
+    {
+        g_isTrackingTime = true;
+        SetFileModifiedState(true);
+        UpdateTimer();
+
+        // Capture foreground window changes, which can be a finer granularity than the polling timer.
+        g_hWinEventHook = SetWinEventHook(
+            EVENT_SYSTEM_FOREGROUND,
+            EVENT_SYSTEM_FOREGROUND,
+            nullptr,
+            &WinEventHookProcedure,
+            0, // idProcess
+            0, // idThread
+            WINEVENT_OUTOFCONTEXT
+        );
+
+        RecordActiveWindowDetails();
+        RefreshUI();
+
+        // Update the toolbar Start and Stop buttons.
+        SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_START_TIME_TRACKING, MAKELONG(TRUE, 0));
+    }
+    else
+    {
+        // Pressing Start a second time stops tracking, as a convenient shortcut,
+        // similar to how pressing the Start/Stop button on a physical stopwatch would work.
+        StopTracking(hWnd);
+    }
+}
+
+void StopTracking(HWND hWnd, bool noUiUpdates)
+{
+    if (g_isTrackingTime)
+    {
+        g_isTrackingTime = false;
+        UpdateTimer();
+        DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
+
+        // Finalize the tail end of the entries with the final time.
+        if (!g_timeEntries.empty())
+        {
+            SetFileModifiedState(true);
+            GetSystemTime(&g_timeEntries.back().endTime);
+            g_timeEntries.back().durationSeconds = CalculateDurationInSeconds(
+                g_timeEntries.back().startTime,
+                g_timeEntries.back().endTime
+            );
+        }
+
+        if (!noUiUpdates)
+        {
+            RefreshUI();
+
+            // Update the toolbar Start and Stop buttons.
+            SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_STOP_TIME_TRACKING, MAKELONG(TRUE, 0));
+        }
+    }
+}
+
+void PauseTrackingBecauseAway(HWND hWnd)
+{
+    g_isUserAway = true;
+    if (g_isTrackingTime)
+    {
+        UpdateTimer();
+        RecordInactiveState();
+        RefreshUI();
+    }
+}
+
+void ResumeTrackingBecauseBack(HWND hWnd)
+{
+    g_isUserAway = false;
+    if (g_isTrackingTime)
+    {
+        UpdateTimer();
+        RecordActiveWindowDetails();
+        RefreshUI();
+    }
+}
+
+bool WindowTitlesAreEquivalent(std::wstring_view first, std::wstring_view second)
+{
+    // Windows frequently indicate document save status with a little circle (asterisk, bullet, black circle, black large circle...)
+    // which doesn't meaningfully change the window title, and we don't want to create separate time entries for the same window
+    // just because of such a status change.
+    //
+    // Some other interesting cases include file copies updating the title bar ("55%", "56%", ...), but those need more complex
+    // handling to avoid false positives. So for now we'll just handle the save status indicators.
+
+    constexpr wchar_t ignorableCharacters[] = { L' ', L'*', L'•', L'●', L'⬤'};
+    for (size_t i = 0, j = 0; i < first.size() && j < second.size(); )
+    {
+        wchar_t ch1 = first[i];
+        wchar_t ch2 = second[j];
+
+        if (std::ranges::contains(ignorableCharacters, ch1))
+        {
+            ++i;
+            continue;
+        }
+        if (std::ranges::contains(ignorableCharacters, ch2))
+        {
+            ++j;
+            continue;
+        }
+        if (ch1 != ch2)
+        {
+            return false;
+        }
+        ++i;
+        ++j;
+    }
+    return true;
+}
+
+void RecordActiveWindowDetails()
+{
+    HWND hForeground = GetForegroundWindow();
+    if (!hForeground)
+    {
+        return;
+    }
+
+    // Check if this is an owned window (e.g., a dialog)
+    // If so, use the owner window instead to get the main application window
+    HWND hOwner = GetWindow(hForeground, GW_OWNER);
+    if (hOwner)
+    {
+        hForeground = hOwner;
+    }
+
+    WCHAR title[256] = {};
+    GetWindowText(hForeground, title, 256);
+    std::wstring windowTitle = title;
+    std::wstring processName = GetProcessName(hForeground);
+
+    SetFileModifiedState(true);
+
+    // Either merge this entry with the previous one if it's the same window,
+    // or append a new entry.
+    if (!g_timeEntries.empty())
+    {
+        TimeEntry& lastEntry = g_timeEntries.back();
+
+        if (lastEntry.processName == processName && WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
+        {
+            GetSystemTime(&lastEntry.endTime);
+            lastEntry.durationSeconds = CalculateDurationInSeconds(lastEntry.startTime, lastEntry.endTime);
+
+            return;
+        }
+        // Different window. So fall through to add a new entry...
+    }
+
+    SYSTEMTIME now;
+    GetSystemTime(&now);
+    TimeEntry entry =
+    {
+        .windowTitle = windowTitle,
+        .processName = processName,
+        .startTime = now,
+        .endTime = now,
+        .durationSeconds = 0,
+    };
+
+    g_timeEntries.push_back(std::move(entry));
+}
+
+void RecordInactiveState()
+{
+    if (!g_timeEntries.empty())
+    {
+        GetSystemTime(&g_timeEntries.back().endTime);
+        g_timeEntries.back().durationSeconds = CalculateDurationInSeconds(
+            g_timeEntries.back().startTime,
+            g_timeEntries.back().endTime
+        );
+    }
+
+    TimeEntry entry = {};
+    entry.windowTitle = L"Away";
+    entry.processName = L"Away";
+
+    GetSystemTime(&entry.startTime);
+    entry.endTime = entry.startTime;
+    entry.durationSeconds = 0;
+
+    g_timeEntries.push_back(entry);
+    SetFileModifiedState(true);
+}
+
+void SelectLastItemInRawList()
+{
+    if (GetFocus() != g_hwndTimeEntriesList)
+    {
+        int count = (int)SendMessage(g_hwndTimeEntriesList, LB_GETCOUNT, 0, 0);
+        if (count > 0)
+        {
+            SendMessage(g_hwndTimeEntriesList, LB_SETTOPINDEX, count - 1, 0);
+        }
+    }
+}
+
+std::wstring GetProcessName(HWND hWnd)
+{
+    DWORD processId = 0;
+    GetWindowThreadProcessId(hWnd, &processId);
+
+    HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
+    if (hProcess)
+    {
+        WCHAR path[MAX_PATH * 2] = {};
+        DWORD pathLength = MAX_PATH * 2;
+
+        // Use QueryFullProcessImageName over GetModuleFileNameEx since we only care about the exe,
+        // not any DLLs loaded in that exe, as it's more robust to limited information cases and WoW64.
+        if (QueryFullProcessImageName(hProcess, 0, path, &pathLength))
+        {
+            std::wstring fullPath = path;
+            size_t pos = fullPath.find_last_of(L"\\/");
+            if (pos != std::wstring::npos)
+            {
+                CloseHandle(hProcess);
+                return fullPath.substr(pos + 1);
+            }
+        }
+        CloseHandle(hProcess);
+    }
+
+    // Fallback case - use window class name for processes we can't open.
+    WCHAR className[256] = {};
+    if (GetClassName(hWnd, className, 256) > 0)
+    {
+        std::wstring classNameString = className;
+        
+        // Detect UWP/Windows Store apps.
+        if (classNameString == L"ApplicationFrameWindow" || 
+            classNameString == L"Windows.UI.Core.CoreWindow")
+        {
+            return L"UWP App";
+        }
+        
+        // Return class name as fallback.
+        if (!classNameString.empty())
+        {
+            return classNameString;
+        }
+    }
+
+    return L"Unknown";
+}
+
+void UpdateTimeEntriesList()
+{
+    int listboxCount = (int)SendMessage(g_hwndTimeEntriesList, LB_GETCOUNT, 0, 0);
+    int entriesCount = (int)g_timeEntries.size();
+
+    if (listboxCount != entriesCount)
+    {
+        // Save selection state before LB_SETCOUNT destroys it.
+        int selectionCount = (int)SendMessage(g_hwndTimeEntriesList, LB_GETSELCOUNT, 0, 0);
+        std::vector<int> selectedIndices;
+        if (selectionCount > 0) // Note LB_ERR == -1, which tests for that too.
+        {
+            selectedIndices.resize(selectionCount);
+            SendMessage(g_hwndTimeEntriesList, LB_GETSELITEMS, selectionCount, (LPARAM)selectedIndices.data());
+        }
+
+        // Preserve scroll position when count changes.
+        int caretIndex = (int)SendMessage(g_hwndTimeEntriesList, LB_GETCARETINDEX, 0, 0);
+        int topIndex = (int)SendMessage(g_hwndTimeEntriesList, LB_GETTOPINDEX, 0, 0);
+
+        SendMessage(g_hwndTimeEntriesList, LB_SETCOUNT, entriesCount, 0);
+
+        // Restore selection state.
+        for (int index : selectedIndices)
+        {
+            if (index < entriesCount)
+            {
+                SendMessage(g_hwndTimeEntriesList, LB_SETSEL, TRUE, index);
+            }
+        }
+
+        // Changing the count sadly resets the caret and top index. So restore them.
+        SendMessage(g_hwndTimeEntriesList, LB_SETCARETINDEX, caretIndex, 0);
+        SendMessage(g_hwndTimeEntriesList, LB_SETTOPINDEX, topIndex, 0);
+    }
+
+    if (entriesCount > 0)
+    {
+        RECT itemRect;
+        SendMessage(g_hwndTimeEntriesList, LB_GETITEMRECT, entriesCount - 1, (LPARAM)&itemRect);
+        InvalidateRect(g_hwndTimeEntriesList, &itemRect, TRUE);
+    }
+}
+
+void UpdateAggregatedTimeEntriesList()
+{
+    int listboxCount = (int)SendMessage(g_hwndAggregatedTimeEntriesList, LB_GETCOUNT, 0, 0);
+    int entriesCount = (int)g_aggregatedEntries.size();
+
+    if (listboxCount != entriesCount)
+    {
+        SendMessage(g_hwndAggregatedTimeEntriesList, LB_SETCOUNT, entriesCount, 0);
+    }
+
+    InvalidateRect(g_hwndAggregatedTimeEntriesList, nullptr, TRUE);
+}
+
+void UpdateTimerDisplay()
+{
+    // Calculate total time from all entries.
+    DWORD totalSeconds = 0;
+    for (const auto& entry : g_aggregatedEntries)
+    {
+        totalSeconds += entry.totalSeconds;
+    }
+
+    std::wstring text = FormatDuration(totalSeconds);
+    SetWindowText(g_hwndTimerDisplay, text.c_str());
+}
+
+void RefreshUI()
+{
+    if (g_hWndMainWindow && !IsIconic(g_hWndMainWindow))
+    {
+        UpdateTimeEntriesList();
+        RecalculateAggregatedData();
+        UpdateAggregatedTimeEntriesList();
+        UpdateTimerDisplay();
+        InvalidateRect(g_hwndPieChart, nullptr, TRUE);
+
+        // If tracking is active, scroll to show the latest entry.
+        if (g_isTrackingTime && !g_timeEntries.empty())
+        {
+            SelectLastItemInRawList();
+        }
+
+        g_needsUIRefresh = false;
+    }
+    else
+    {
+        g_needsUIRefresh = true;
+    }
+}
+
+void RecalculateAggregatedData()
+{
+    g_aggregatedEntries.clear();
+
+    std::map<std::wstring, DWORD> processTimeMap;
+    DWORD totalTime = 0;
+
+    for (const auto& entry : g_timeEntries)
+    {
+        // Apply filters.
+        if (!g_showAwayTime && entry.processName == L"Away")
+        {
+            continue;
+        }
+        if (!g_showSelf && entry.processName == L"WhereDoesTimeGo.exe")
+        {
+            continue;
+        }
+
+        processTimeMap[entry.processName] += entry.durationSeconds;
+        totalTime += entry.durationSeconds;
+    }
+
+    for (const auto& pair : processTimeMap)
+    {
+        AggregatedTimeEntry aggregateTimeEntry = {};
+        aggregateTimeEntry.processName = pair.first;
+        aggregateTimeEntry.totalSeconds = pair.second;
+        aggregateTimeEntry.percentage = totalTime > 0 ? (float)pair.second / totalTime * 100.0f : 100.0f;
+        g_aggregatedEntries.push_back(aggregateTimeEntry);
+    }
+
+    std::ranges::sort(
+        g_aggregatedEntries,
+        [](const AggregatedTimeEntry& a, const AggregatedTimeEntry& b) {
+            return a.totalSeconds > b.totalSeconds;
+        }
+    );
+}
+
+void DrawPieChart(HDC hdc, RECT& rect)
+{
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+
+    HDC memoryDC = CreateCompatibleDC(hdc);
+    HBITMAP memoryBitmap = CreateCompatibleBitmap(hdc, width, height);
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(memoryDC, memoryBitmap);
+
+    Gdiplus::Graphics graphics(memoryDC);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    COLORREF backgroundColor = GetSysColor(COLOR_BTNFACE);
+    graphics.Clear(Gdiplus::Color(255, GetRValue(backgroundColor), GetGValue(backgroundColor), GetBValue(backgroundColor)));
+
+    int diameter = std::min(width, height) - 100;
+    int centerX = width / 2;
+    int centerY = height / 2;
+    int x = centerX - diameter / 2;
+    int y = centerY - diameter / 2;
+
+    Gdiplus::Color colors[] =
+    {
+        Gdiplus::Color(255, 66, 133, 244),
+        Gdiplus::Color(255, 234, 67, 53),
+        Gdiplus::Color(255, 251, 188, 5),
+        Gdiplus::Color(255, 52, 168, 83),
+        Gdiplus::Color(255, 171, 71, 188),
+        Gdiplus::Color(255, 255, 112, 67),
+        Gdiplus::Color(255, 0, 172, 193),
+        Gdiplus::Color(255, 158, 158, 158)
+    };
+    constexpr int colorCount = int(std::size(colors));
+
+    float startAngle = 0.0f;
+
+    // Get base color, and blend with increasing saturation toward gray for entries beyond the colors array.
+    auto getColor = [&](int i)
+    {
+        Gdiplus::Color baseColor = colors[i % colorCount];
+        int cycleGroup = (int)(i / colorCount);
+        float grayBlendFactor = std::min(0.8f, cycleGroup * 0.5f);
+
+        BYTE r = (BYTE)(std::lerp<float>(baseColor.GetR(), 128, grayBlendFactor));
+        BYTE g = (BYTE)(std::lerp<float>(baseColor.GetG(), 128, grayBlendFactor));
+        BYTE b = (BYTE)(std::lerp<float>(baseColor.GetB(), 128, grayBlendFactor));
+
+        Gdiplus::Color color(255, r, g, b);
+        return color;
+    };
+
+    for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
+    {
+        float sweepAngle = g_aggregatedEntries[i].percentage * 3.6f;
+
+        Gdiplus::Color baseColor = colors[i % colorCount];
+        Gdiplus::SolidBrush brush(getColor(int(i)));
+
+        graphics.FillPie(&brush, x, y, diameter, diameter, startAngle, sweepAngle);
+
+        startAngle += sweepAngle;
+    }
+
+    if (g_aggregatedEntries.empty())
+    {
+        Gdiplus::SolidBrush brush(Gdiplus::Color(255, 200, 200, 200));
+        graphics.FillPie(&brush, x, y, diameter, diameter, 0, 360);
+
+        Gdiplus::Font font(L"Segoe UI", 12);
+        Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 0, 0, 0));
+        Gdiplus::StringFormat format;
+        format.SetAlignment(Gdiplus::StringAlignmentCenter);
+        format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+        Gdiplus::RectF layoutRect(0, 0, (float)width, (float)height);
+        graphics.DrawString(L"No data to display", -1, &font, layoutRect, &format, &textBrush);
+    }
+    else
+    {
+        Gdiplus::Font font(L"Segoe UI", 10);
+        Gdiplus::SolidBrush blackBrush(Gdiplus::Color::Black);
+        Gdiplus::SolidBrush backgroundBrush(Gdiplus::Color(0xFF000000 | backgroundColor));
+
+        int legendX = 10;
+        int legendY = 10;
+        int legendItemHeight = 20;
+
+        for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
+        {
+            Gdiplus::SolidBrush legendBrush(getColor(int(i)));
+
+            graphics.FillRectangle(&legendBrush, legendX, int(legendY + i * legendItemHeight), 15, 15);
+
+            std::wstringstream stringStream;
+            stringStream << g_aggregatedEntries[i].processName
+                         << L" - "
+                         << std::fixed
+                         << std::setprecision(1)
+                         << g_aggregatedEntries[i].percentage
+                         << L"%";
+
+            Gdiplus::PointF point((float)(legendX + 20), (float)(legendY + i * legendItemHeight));
+
+            // Draw gray "shadow" for basic blur effect behind text, which helps when the text is drawn over the chart.
+            for (int dx = -1; dx <= 1; dx++)
+            {
+                for (int dy = -1; dy <= 1; dy++)
+                {
+                    if (dx != 0 || dy != 0)
+                    {
+                        Gdiplus::PointF shadowPoint(point.X + dx, point.Y + dy);
+                        graphics.DrawString(stringStream.str().c_str(), -1, &font, shadowPoint, &backgroundBrush);
+                    }
+                }
+            }
+
+            // Draw black text on top.
+            graphics.DrawString(stringStream.str().c_str(), -1, &font, point, &blackBrush);
+        }
+    }
+
+    BitBlt(hdc, 0, 0, width, height, memoryDC, 0, 0, SRCCOPY);
+
+    SelectObject(memoryDC, oldBitmap);
+    DeleteObjectAndNullify(memoryBitmap);
+    DeleteDC(memoryDC);
+}
+
+bool WriteTextFile(const WCHAR* filename, std::wstring_view content)
+{
+    HANDLE hFile = CreateFile(filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    constexpr char8_t utf8Bom[] = {0xEF, 0xBB, 0xBF};
+    DWORD bytesWritten;
+    WriteFile(hFile, utf8Bom, 3, &bytesWritten, nullptr);
+
+    int utf8Length = WideCharToMultiByte(CP_UTF8, 0, content.data(), (int)content.length(), nullptr, 0, nullptr, nullptr);
+    if (utf8Length > 0)
+    {
+        std::vector<char> utf8Buffer(utf8Length);
+        WideCharToMultiByte(CP_UTF8, 0, content.data(), (int)content.length(), utf8Buffer.data(), utf8Length, nullptr, nullptr);
+
+        WriteFile(hFile, utf8Buffer.data(), utf8Length, &bytesWritten, nullptr);
+    }
+
+    CloseHandle(hFile);
+    return true;
+}
+
+bool ReadTextFile(const WCHAR* filename, std::wstring& outContent)
+{
+    outContent.clear();
+
+    HANDLE hFile = CreateFile(filename, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+    if (hFile == INVALID_HANDLE_VALUE)
+    {
+        return false;
+    }
+
+    DWORD fileSize = GetFileSize(hFile, nullptr);
+    if (fileSize == INVALID_FILE_SIZE)
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+
+    std::vector<char8_t> utf8Buffer(fileSize + 1);
+    DWORD bytesRead;
+    if (!ReadFile(hFile, utf8Buffer.data(), fileSize, &bytesRead, nullptr))
+    {
+        CloseHandle(hFile);
+        return false;
+    }
+    utf8Buffer[bytesRead] = 0;
+    CloseHandle(hFile);
+
+    const char8_t* utf8Start = utf8Buffer.data();
+    auto utf8View = std::u8string_view(utf8Buffer.data(), utf8Buffer.size());
+    constexpr char8_t utf8Bom[] = {0xEF, 0xBB, 0xBF};
+    if (utf8View.starts_with(utf8Bom))
+    {
+        utf8Start += 3;
+    }
+
+    int wideLength = MultiByteToWideChar(CP_UTF8, 0, (const char*)utf8Start, -1, nullptr, 0);
+    if (wideLength <= 0)
+    {
+        return false;
+    }
+
+    std::vector<WCHAR> wideBuffer(wideLength);
+    MultiByteToWideChar(CP_UTF8, 0, (const char*)utf8Start, -1, wideBuffer.data(), wideLength);
+    outContent = wideBuffer.data();
+
+    return true;
+}
+
+void UpdateWindowTitle()
+{
+    std::wstring title = g_defaultWindowTitle;
+    title.append(L" - ");
+    title.append(g_timeEntriesFilePath.empty() ? L"Untitled" : g_timeEntriesFilePath);
+    title.append(g_timeEntriesAreModified ? L" *" : L"");
+    SetWindowText(g_hWndMainWindow, title.c_str());
+}
+
+void SetTimeEntriesFilePath(const std::wstring& filePath)
+{
+    g_timeEntriesFilePath = filePath;
+    g_timeEntriesAreModified = false; // Updating the file path implies we've just saved or loaded. So reset the modified state.
+    UpdateWindowTitle();
+}
+
+void SetFileModifiedState(bool isModified)
+{
+    if (g_timeEntriesAreModified != isModified)
+    {
+        g_timeEntriesAreModified = isModified;
+        UpdateWindowTitle();
+    }
+}
+
+void NewFile(HWND hWnd)
+{
+    g_timeEntries.clear();
+    g_aggregatedEntries.clear();
+    SetTimeEntriesFilePath(L"");
+
+    RefreshUI();
+}
+
+// Use the existing filename, if already saved before.
+// Otherwise generate a new Untitled filename using the current time.
+// Place logs in the LocalAppData folder.
+void CopyOrGenerateTimeEntriesFilePath(std::span<wchar_t> targetFilename)
+{
+    if (g_timeEntriesFilePath.empty())
+    {
+        SYSTEMTIME now;
+        GetSystemTime(&now);
+        std::wstring settingsPath = GetSettingsPath(true, false);
+        std::wstring baseFilename = settingsPath + L"\\Untitled-" + std::format(L"{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond);
+        std::wstring filename = baseFilename + L".wdtg.csv";
+        wcsncpy_s(targetFilename.data(), targetFilename.size(), filename.c_str(), _TRUNCATE);
+    }
+    else
+    {
+        const wchar_t* sourceFilename = !g_timeEntriesFilePath.empty() ? g_timeEntriesFilePath.c_str() : L"Untitled";
+        wcsncpy_s(targetFilename.data(), targetFilename.size(), sourceFilename, _TRUNCATE);
+    }
+}
+
+void SaveAsToCSV(HWND hWnd)
+{
+    OPENFILENAME ofn = {};
+    WCHAR filename[MAX_PATH * 4] = {};
+    CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
+
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = DWORD(std::size(filename));
+    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = nullptr;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = nullptr;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
+    ofn.lpstrDefExt = L"wdtg.csv";
+
+    if (GetSaveFileName(&ofn))
+    {
+        SetTimeEntriesFilePath(ofn.lpstrFile);
+        SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
+    }
+}
+
+void SaveToCSV(HWND hWnd)
+{
+    if (g_timeEntriesFilePath.empty())
+    {
+        SaveAsToCSV(hWnd);
+        return;
+    }
+
+    SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
+}
+
+void SaveToCSV(HWND hWnd, wchar_t const* filePath)
+{
+    // Use the passed name if provided, or generate a new one if not already set.
+    WCHAR filenameBuffer[MAX_PATH * 4] = {};
+    if (filePath == nullptr || filePath[0] == L'\0')
+    {
+        CopyOrGenerateTimeEntriesFilePath(/*out*/ filenameBuffer);
+        filePath = filenameBuffer;
+    }
+
+    std::wstringstream csvData;
+    csvData << L"Window Title,Process Name,Start Time,End Time,Duration (seconds)\n";
+
+    for (const auto& entry : g_timeEntries)
+    {
+        std::wstring windowTitle = entry.windowTitle;
+        std::replace(windowTitle.begin(), windowTitle.end(), L',', L';');
+        std::replace(windowTitle.begin(), windowTitle.end(), L'\n', L' ');
+        std::replace(windowTitle.begin(), windowTitle.end(), L'\r', L' ');
+        std::replace(windowTitle.begin(), windowTitle.end(), L'"', L'\'');
+
+        csvData << L"\"" << windowTitle << L"\","
+                << entry.processName << L","
+                << FormatTime(entry.startTime) << L","
+                << FormatTime(entry.endTime) << L"\n";
+
+        // Don't save durationSeconds, since it can be recomputed and removes potential inconsistencies if the file is edited manually.
+    }
+
+    if (!WriteTextFile(filePath, csvData.str()))
+    {
+        MessageBox(hWnd, L"Failed to write file", L"Error", MB_OK | MB_ICONERROR);
+    }
+    else
+    {
+        SetFileModifiedState(false);
+    }
+}
+
+bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& outEntries)
+{
+    std::wstringstream fileStream(fileContent);
+    std::wstring line;
+    std::getline(fileStream, line); // Skip header
+
+    while (std::getline(fileStream, line))
+    {
+        if (line.empty())
+        {
+            continue;
+        }
+
+        TimeEntry entry = {};
+
+        size_t position1 = line.find(L'"');
+        size_t position2 = line.find(L'"', position1 + 1);
+        if (position1 != std::wstring::npos && position2 != std::wstring::npos)
+        {
+            entry.windowTitle = line.substr(position1 + 1, position2 - position1 - 1);
+            line = line.substr(position2 + 2);
+        }
+        else
+        {
+            continue;
+        }
+
+        std::wstringstream ss(line);
+        std::wstring token;
+
+        std::getline(ss, entry.processName, L',');
+
+        std::getline(ss, token, L',');
+        int scannedStart = swscanf_s(
+            token.c_str(),
+            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu",
+            &entry.startTime.wYear, &entry.startTime.wMonth, &entry.startTime.wDay,
+            &entry.startTime.wHour, &entry.startTime.wMinute, &entry.startTime.wSecond
+        );
+
+        std::getline(ss, token, L',');
+        int scannedEnd = swscanf_s(
+            token.c_str(),
+            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu",
+            &entry.endTime.wYear, &entry.endTime.wMonth, &entry.endTime.wDay,
+            &entry.endTime.wHour, &entry.endTime.wMinute, &entry.endTime.wSecond
+        );
+
+        entry.durationSeconds = CalculateDurationInSeconds(entry.startTime, entry.endTime);
+
+        if (scannedStart == 6 && scannedEnd == 6)
+        {
+            outEntries.push_back(entry);
+        }
+    }
+
+    return !outEntries.empty();
+}
+
+std::wstring GetSettingsPath(bool createPath, bool addFileName)
+{
+    WCHAR path[MAX_PATH];
+    SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path);
+    std::wstring settingsPath = path;
+    settingsPath += L"\\Pikensoft";
+    if (createPath)
+    {
+        CreateDirectory(settingsPath.c_str(), nullptr);
+    }
+    settingsPath += L"\\WhereDoesTimeGo";
+    if (createPath)
+    {
+        CreateDirectory(settingsPath.c_str(), nullptr);
+    }
+    if (addFileName)
+    {
+        settingsPath += L"\\settings.ini";
+    }
+    return settingsPath;
+}
+
+void SaveSettings()
+{
+    std::wstring path = GetSettingsPath(true);
+    std::wofstream file(path);
+    
+    file << L"; WhereDoesTimeGo v1.0 2026-06-18\n\n";
+    file << L"[View]\n";
+    file << L"ShowTimeEntries=" << g_showTimeEntries << L"\n";
+    file << L"ShowPieChart=" << g_showPieChart << L"\n";
+    file << L"ShowTimer=" << g_showTimer << L"\n";
+    file << L"ShowAwayTime=" << g_showAwayTime << L"\n";
+    file << L"ShowSelf=" << g_showSelf << L"\n";
+    
+    file << L"\n[File]\n";
+    file << L"SaveOnExit=" << g_saveOnExit << L"\n";
+    
+    file << L"\n[Track]\n";
+    file << L"PollingInterval=" << g_pollingInterval << L"\n";
+    
+    file.close();
+}
+
+bool ParseBool(const std::wstring& value, bool defaultValue = false)
+{
+    if (value.empty()) return defaultValue;
+    return value == L"1" || value == L"true" || value == L"True";
+}
+
+int ParseInt(const std::wstring& value, int defaultValue = 0)
+{
+    if (value.empty()) return defaultValue;
+    return _wtoi(value.c_str());
+}
+
+void LoadSettings()
+{
+    std::wstring path = GetSettingsPath();
+    std::wifstream file(path);
+    
+    if (!file.is_open())
+    {
+        return; // Use defaults
+    }
+    
+    std::wstring line, section;
+    std::map<std::wstring, std::wstring> settings;
+    
+    while (std::getline(file, line))
+    {
+        line.erase(0, line.find_first_not_of(L" \t\r\n"));
+        line.erase(line.find_last_not_of(L" \t\r\n") + 1);
+        
+        if (line.empty() || line[0] == L';')
+        {
+            continue;
+        }
+        
+        if (line[0] == L'[' && line.back() == L']')
+        {
+            section = line.substr(1, line.length() - 2);
+        }
+        else
+        {
+            size_t position = line.find(L'=');
+            if (position != std::wstring::npos)
+            {
+                std::wstring key = section + L"." + line.substr(0, position);
+                std::wstring value = line.substr(position + 1);
+                key.erase(key.find_last_not_of(L" \t") + 1);
+                value.erase(0, value.find_first_not_of(L" \t"));
+                settings[key] = value;
+            }
+        }
+    }
+    
+    g_showTimeEntries = ParseBool(settings[L"View.ShowTimeEntries"], true);
+    g_showPieChart = ParseBool(settings[L"View.ShowPieChart"], true);
+    g_showTimer = ParseBool(settings[L"View.ShowTimer"], true);
+    g_showAwayTime = ParseBool(settings[L"View.ShowAwayTime"], true);
+    g_showSelf = ParseBool(settings[L"View.ShowSelf"], true);
+    g_saveOnExit = ParseBool(settings[L"File.SaveOnExit"], false);
+    g_pollingInterval = ParseInt(settings[L"Track.PollingInterval"], 1000);
+}
+
+void SortTimeEntriesByTime()
+{
+    std::sort(
+        g_timeEntries.begin(),
+        g_timeEntries.end(),
+        [](const TimeEntry& a, const TimeEntry& b)
+        {
+            FILETIME ftA, ftB;
+            SystemTimeToFileTime(&a.startTime, &ftA);
+            SystemTimeToFileTime(&b.startTime, &ftB);
+
+            ULARGE_INTEGER uliA, uliB;
+            uliA.LowPart = ftA.dwLowDateTime;
+            uliA.HighPart = ftA.dwHighDateTime;
+            uliB.LowPart = ftB.dwLowDateTime;
+            uliB.HighPart = ftB.dwHighDateTime;
+
+            return uliA.QuadPart < uliB.QuadPart;
+        }
+    );
+}
+
+void LoadFromCSV(HWND hWnd)
+{
+    OPENFILENAME ofn = {};
+    WCHAR filename[MAX_PATH * 4] = {};
+    CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
+
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = DWORD(std::size(filename));
+    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = nullptr;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = nullptr;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    ofn.lpstrDefExt = L"wdtg.csv";
+
+    if (GetOpenFileName(&ofn))
+    {
+        SetTimeEntriesFilePath(ofn.lpstrFile);
+
+        std::wstring fileContent;
+        if (!ReadTextFile(filename, fileContent))
+        {
+            MessageBox(hWnd, L"Failed to read file", L"Error", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        g_timeEntries.clear();
+        ParseCSVEntries(fileContent, g_timeEntries);
+        SetFileModifiedState(false);
+
+        RefreshUI();
+        SelectLastItemInRawList();
+    }
+}
+
+void MergeFromCSV(HWND hWnd)
+{
+    OPENFILENAME ofn = {};
+    WCHAR filename[MAX_PATH * 4] = {};
+
+    ofn.lStructSize = sizeof(OPENFILENAME);
+    ofn.hwndOwner = hWnd;
+    ofn.lpstrFile = filename;
+    ofn.nMaxFile = DWORD(std::size(filename));
+    ofn.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
+    ofn.nFilterIndex = 1;
+    ofn.lpstrFileTitle = nullptr;
+    ofn.nMaxFileTitle = 0;
+    ofn.lpstrInitialDir = nullptr;
+    ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
+    ofn.lpstrDefExt = L"wdtg.csv";
+
+    if (GetOpenFileName(&ofn))
+    {
+        std::wstring fileContent;
+        if (!ReadTextFile(filename, fileContent))
+        {
+            MessageBox(hWnd, L"Failed to read file", L"Error", MB_OK | MB_ICONERROR);
+            return;
+        }
+
+        std::vector<TimeEntry> newEntries;
+        if (ParseCSVEntries(fileContent, newEntries))
+        {
+            // Append new entries to existing ones
+            g_timeEntries.insert(g_timeEntries.end(), newEntries.begin(), newEntries.end());
+            SetFileModifiedState(true);
+
+            // Sort all entries by start time
+            SortTimeEntriesByTime();
+
+            RefreshUI();
+        }
+    }
+}
+
+void DeleteSelectedEntries()
+{
+    int count = (int)SendMessage(g_hwndTimeEntriesList, LB_GETSELCOUNT, 0, 0);
+    if (count > 0)
+    {
+        std::vector<int> selectedIndices(count);
+        SendMessage(g_hwndTimeEntriesList, LB_GETSELITEMS, count, (LPARAM)selectedIndices.data());
+
+        std::sort(selectedIndices.begin(), selectedIndices.end(), std::greater<int>());
+
+        for (int index : selectedIndices)
+        {
+            if (index >= 0 && index < (int)g_timeEntries.size())
+            {
+                g_timeEntries.erase(g_timeEntries.begin() + index);
+            }
+        }
+        SetFileModifiedState(true);
+
+        RefreshUI();
+    }
+}
+
+void InsertEntry(HWND hWnd)
+{
+    // Create a new temporary entry with current time.
+    TimeEntry tempEntry = {};
+    GetSystemTime(&tempEntry.startTime);
+    tempEntry.endTime = tempEntry.startTime;
+    tempEntry.windowTitle = L"";
+    tempEntry.processName = L"";
+    tempEntry.durationSeconds = 0;
+
+    // Append temporary entry to the end.
+    g_timeEntries.push_back(tempEntry);
+    g_editingEntryIndex = (int)g_timeEntries.size() - 1;
+
+    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, EditEntryDialog) == IDOK)
+    {
+        RefreshUI();
+        SelectLastItemInRawList();
+        SetFileModifiedState(true);
+    }
+    else
+    {
+        // User cancelled - so remove the temporary entry.
+        g_timeEntries.pop_back();
+    }
+
+    g_editingEntryIndex = -1;
+}
+
+void AddLapEntry(HWND hWnd)
+{
+    if (g_timeEntries.empty())
+    {
+        return;
+    }
+
+    // Duplicate the last entry, with empty time.
+    g_timeEntries.reserve(g_timeEntries.size() + 1);
+    g_timeEntries.push_back(g_timeEntries.back());
+    TimeEntry& lastEntry = g_timeEntries.back();
+    lastEntry.startTime = lastEntry.endTime;
+    SetFileModifiedState(true);
+
+    RefreshUI();
+}
+
+void ClearAllEntries(HWND hWnd)
+{
+    if (g_timeEntries.empty())
+    {
+        return;
+    }
+
+    g_timeEntries.clear();
+    g_aggregatedEntries.clear();
+    SetFileModifiedState(true);
+
+    RefreshUI();
+}
+
+void EditSelectedEntry(HWND hWnd)
+{
+    int selectionCount = (int)SendMessage(g_hwndTimeEntriesList, LB_GETSELCOUNT, 0, 0);
+    if (selectionCount != 1)
+    {
+        MessageBox(hWnd, L"Please select exactly one time entry to edit", L"Edit Time Entry", MB_OK | MB_ICONINFORMATION);
+        return;
+    }
+
+    int selectedIndex = -1;
+    SendMessage(g_hwndTimeEntriesList, LB_GETSELITEMS, 1, (LPARAM)&selectedIndex);
+
+    if (selectedIndex >= 0 && selectedIndex < (int)g_timeEntries.size())
+    {
+        g_editingEntryIndex = selectedIndex;
+        if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, EditEntryDialog) == IDOK)
+        {
+            SetFileModifiedState(true);
+            RefreshUI();
+        }
+        g_editingEntryIndex = -1;
+    }
+}
+
+DWORD CalculateDurationInSeconds(const SYSTEMTIME& timeStart, const SYSTEMTIME& timeEnd)
+{
+    FILETIME fileTimeStart, fileTimeEnd;
+    SystemTimeToFileTime(&timeStart, &fileTimeStart);
+    SystemTimeToFileTime(&timeEnd, &fileTimeEnd);
+
+    ULARGE_INTEGER uliStart, uliEnd;
+    uliStart.LowPart = fileTimeStart.dwLowDateTime;
+    uliStart.HighPart = fileTimeStart.dwHighDateTime;
+    uliEnd.LowPart = fileTimeEnd.dwLowDateTime;
+    uliEnd.HighPart = fileTimeEnd.dwHighDateTime;
+
+    if (uliEnd.QuadPart < uliStart.QuadPart)
+    {
+        return 0;
+    }
+
+    ULONGLONG diff = uliEnd.QuadPart - uliStart.QuadPart;
+    return (DWORD)((diff + 5000000) / 10000000); // Round to nearest second instead of truncating.
+}
+
+bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
+{
+    FILETIME fileTime1, fileTime2;
+    SystemTimeToFileTime(&time1, &fileTime1);
+    SystemTimeToFileTime(&time2, &fileTime2);
+
+    ULARGE_INTEGER uli1, uli2;
+    uli1.LowPart  = fileTime1.dwLowDateTime;
+    uli1.HighPart = fileTime1.dwHighDateTime;
+    uli2.LowPart  = fileTime2.dwLowDateTime;
+    uli2.HighPart = fileTime2.dwHighDateTime;
+
+    return uli1.QuadPart >= uli2.QuadPart;
+}
+
+std::wstring FormatTime(const SYSTEMTIME& time)
+{
+    WCHAR buffer[64];
+    swprintf_s(
+        buffer,
+        L"%04d-%02d-%02d %02d:%02d:%02d",
+        time.wYear, time.wMonth, time.wDay,
+        time.wHour, time.wMinute, time.wSecond
+    );
+    return buffer;
+}
+
+std::wstring FormatDuration(DWORD totalSeconds)
+{
+    DWORD hours   = totalSeconds / 3600;
+    DWORD minutes = (totalSeconds % 3600) / 60;
+    DWORD seconds = totalSeconds % 60;
+
+    WCHAR buffer[64];
+    swprintf_s(buffer, L"%02dh %02dm %02ds", hours, minutes, seconds);
+    return buffer;
+}
+
+LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    switch (message)
+    {
+    case WM_NCCREATE:
+        g_hWndMainWindow = hWnd;
+        return TRUE;
+
+    case WM_CREATE:
+        SetTimeEntriesFilePath(L"");
+        // Sigh, the inconsistency between CREATE and NCCREATE is confusing.
+        // In WM_NCCREATE, TRUE means continue, FALSE means abort.
+        // In WM_CREATE, 0 means continue, -1 means abort.
+        return 0;
+
+    case WM_SIZE:
+        ResizeControls(hWnd);
+        // If window was restored from minimized and we have pending UI updates, refresh now.
+        if (wParam == SIZE_RESTORED || wParam == SIZE_MAXIMIZED)
+        {
+            UpdateTimer(); // Restore the timer to normal frequency.
+            if (g_needsUIRefresh)
+            {
+                RefreshUI();
+            }
+        }
+        else if (wParam == SIZE_MINIMIZED)
+        {
+            UpdateTimer(); // Throttle the timer when minimized to reduce CPU usage.
+        }
+        break;
+
+    case WM_TIMER:
+        if (wParam == TIMER_TRACK_ID)
+        {
+            RecordActiveWindowDetails();
+            RefreshUI();
+        }
+        break;
+
+    case WM_POWERBROADCAST:
+        switch (wParam)
+        {
+        case PBT_APMSUSPEND:
+        case PBT_APMSTANDBY:
+            PauseTrackingBecauseAway(hWnd);
+            break;
+        case PBT_APMRESUMESUSPEND:
+        case PBT_APMRESUMESTANDBY:
+        case PBT_APMRESUMECRITICAL:
+        case PBT_APMRESUMEAUTOMATIC:
+            ResumeTrackingBecauseBack(hWnd);
+            break;
+        }
+        break;
+
+    case WM_WTSSESSION_CHANGE:
+        // Message enabled by WTSRegisterSessionNotification.
+        switch (wParam)
+        {
+        case WTS_SESSION_LOCK:
+            PauseTrackingBecauseAway(hWnd);
+            break;
+        case WTS_SESSION_UNLOCK:
+            ResumeTrackingBecauseBack(hWnd);
+            break;
+        }
+        break;
+
+    case WM_INITMENUPOPUP:
+    {
+        HMENU hMenu = (HMENU)wParam;
+        // Update checkmarks for File menu items.
+        CheckMenuItem(hMenu, IDM_SAVE_ON_EXIT, MF_BYCOMMAND | (g_saveOnExit ? MF_CHECKED : MF_UNCHECKED));
+        // Update checkmarks for View menu items.
+        CheckMenuItem(hMenu, IDM_SHOW_TIME_ENTRIES, MF_BYCOMMAND | (g_showTimeEntries ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_PIE_CHART, MF_BYCOMMAND | (g_showPieChart ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_TIMER, MF_BYCOMMAND | (g_showTimer ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_AWAY_TIME, MF_BYCOMMAND | (g_showAwayTime ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_SELF, MF_BYCOMMAND | (g_showSelf ? MF_CHECKED : MF_UNCHECKED));
+        // Update checkmarks for Track > Polling Frequency submenu.
+        CheckMenuItem(hMenu, IDM_POLLING_1SEC, MF_BYCOMMAND | (g_pollingInterval == 1000 ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_POLLING_10SEC, MF_BYCOMMAND | (g_pollingInterval == 10000 ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_POLLING_60SEC, MF_BYCOMMAND | (g_pollingInterval == 60000 ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_POLLING_10MIN, MF_BYCOMMAND | (g_pollingInterval == 600000 ? MF_CHECKED : MF_UNCHECKED));
+    }
+    break;
+
+    case WM_COMMAND:
+    {
+        int wmId = LOWORD(wParam);
+        int wmEvent = HIWORD(wParam);
+
+        if (wmEvent == LBN_DBLCLK && wmId == IDC_RAW_TIME_ENTRY_LIST)
+        {
+            EditSelectedEntry(hWnd);
+            break;
+        }
+
+        switch (wmId)
+        {
+        case IDM_ABOUT:
+            DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_ABOUTBOX), hWnd, &AboutDialog);
+            break;
+        case IDM_EXIT:
+            DestroyWindow(hWnd);
+            break;
+        case IDM_NEW:
+            NewFile(hWnd);
+            break;
+        case IDM_OPEN:
+            LoadFromCSV(hWnd);
+            break;
+        case IDM_MERGE:
+            MergeFromCSV(hWnd);
+            break;
+        case IDM_SAVE:
+            SaveToCSV(hWnd);
+            break;
+        case IDM_SAVEAS:
+            SaveAsToCSV(hWnd);
+            break;
+        case IDM_INSERT:
+            InsertEntry(hWnd);
+            break;
+        case IDM_EDIT:
+            EditSelectedEntry(hWnd);
+            break;
+        case IDM_DELETE:
+            DeleteSelectedEntries();
+            break;
+        case IDM_CLEAR_ENTRIES:
+            ClearAllEntries(hWnd);
+            break;
+        case IDM_SAVE_ON_EXIT:
+            g_saveOnExit = !g_saveOnExit;
+            break;
+        case IDM_START_TIME_TRACKING:
+            StartTracking(hWnd);
+            break;
+        case IDM_ADD_LAP_ENTRY:
+            AddLapEntry(hWnd);
+            break;
+        case IDM_STOP_TIME_TRACKING:
+            StopTracking(hWnd);
+            break;
+        case IDM_SHOW_TIME_ENTRIES:
+            g_showTimeEntries = !g_showTimeEntries;
+            SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_SHOW_TIME_ENTRIES, MAKELONG(g_showTimeEntries, 0));
+            ResizeControls(hWnd);
+            break;
+        case IDM_SHOW_PIE_CHART:
+            g_showPieChart = !g_showPieChart;
+            SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_SHOW_PIE_CHART, MAKELONG(g_showPieChart, 0));
+            ResizeControls(hWnd);
+            break;
+        case IDM_SHOW_TIMER:
+            g_showTimer = !g_showTimer;
+            SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_SHOW_TIMER, MAKELONG(g_showTimer, 0));
+            ResizeControls(hWnd);
+            break;
+        case IDM_SHOW_AWAY_TIME:
+            g_showAwayTime = !g_showAwayTime;
+            RefreshUI();
+            break;
+        case IDM_SHOW_SELF:
+            g_showSelf = !g_showSelf;
+            RefreshUI();
+            break;
+        case IDM_POLLING_1SEC:
+            g_pollingInterval = 1000;
+            if (g_isTrackingTime)
+            {
+                KillTimer(hWnd, TIMER_TRACK_ID);
+                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+            }
+            break;
+        case IDM_POLLING_10SEC:
+            g_pollingInterval = 10000;
+            if (g_isTrackingTime)
+            {
+                KillTimer(hWnd, TIMER_TRACK_ID);
+                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+            }
+            break;
+        case IDM_POLLING_60SEC:
+            g_pollingInterval = 60000;
+            if (g_isTrackingTime)
+            {
+                KillTimer(hWnd, TIMER_TRACK_ID);
+                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+            }
+            break;
+        case IDM_POLLING_10MIN:
+            g_pollingInterval = 600000;
+            if (g_isTrackingTime)
+            {
+                KillTimer(hWnd, TIMER_TRACK_ID);
+                SetTimer(hWnd, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+            }
+            break;
+        case IDM_LOGS_FOLDER:
+            {
+                // Open the folder in Windows Explorer.
+                SaveSettings();
+                std::wstring settingsPath = GetSettingsPath(false, false);
+                ShellExecute(nullptr, L"explore", settingsPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
+            }
+            break;
+        default:
+            return DefWindowProc(hWnd, message, wParam, lParam);
+        }
+    }
+    break;
+
+    case WM_DRAWITEM:
+    {
+        LPDRAWITEMSTRUCT drawItemStruct = (LPDRAWITEMSTRUCT)lParam;
+
+        if (drawItemStruct->CtlID == IDC_RAW_TIME_ENTRY_LIST)
+        {
+            if (drawItemStruct->itemID == -1)
+                break;
+
+            size_t index = (size_t)drawItemStruct->itemID;
+            if (index >= g_timeEntries.size())
+                break;
+
+            const TimeEntry& entry = g_timeEntries[index];
+
+            COLORREF colorBackground = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+            COLORREF colorText = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
+
+            HBRUSH backgroundBrush = CreateSolidBrush(colorBackground);
+            FillRect(drawItemStruct->hDC, &drawItemStruct->rcItem, backgroundBrush);
+            DeleteObjectAndNullify(backgroundBrush);
+
+            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
+            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
+            SetTextColor(drawItemStruct->hDC, colorText);
+
+            RECT textRect = drawItemStruct->rcItem;
+            textRect.left += 5;
+            textRect.top += 3;
+
+            std::wstring text = entry.processName + L" - " + entry.windowTitle;
+            if (text.length() > 255)
+            {
+                text = text.substr(0, 252) + L"...";
+            }
+
+            DrawText(drawItemStruct->hDC, text.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+            textRect.top += 22;
+            std::wstring timeText = L"    " + FormatTime(entry.startTime) +
+                L" (" +
+                FormatDuration(entry.durationSeconds) +
+                L")";
+            DrawText(drawItemStruct->hDC, timeText.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+            SelectObject(drawItemStruct->hDC, oldFont);
+
+            if (drawItemStruct->itemState & ODS_FOCUS)
+            {
+                DrawFocusRect(drawItemStruct->hDC, &drawItemStruct->rcItem);
+            }
+        }
+        else if (drawItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
+        {
+            if (drawItemStruct->itemID == -1)
+                break;
+
+            size_t index = (size_t)drawItemStruct->itemID;
+            if (index >= g_aggregatedEntries.size())
+                break;
+
+            const AggregatedTimeEntry& entry = g_aggregatedEntries[index];
+
+            COLORREF colorBackground = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHT : COLOR_WINDOW);
+            COLORREF colorText = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
+
+            HBRUSH backgroundBrush = CreateSolidBrush(colorBackground);
+            FillRect(drawItemStruct->hDC, &drawItemStruct->rcItem, backgroundBrush);
+            DeleteObjectAndNullify(backgroundBrush);
+
+            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
+            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
+            SetTextColor(drawItemStruct->hDC, colorText);
+
+            RECT textRect = drawItemStruct->rcItem;
+            textRect.left += 5;
+            textRect.top += 3;
+
+            DrawText(drawItemStruct->hDC, entry.processName.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+            textRect.top += 22;
+
+            WCHAR buffer[128];
+            swprintf_s(buffer, L"    %s   (%.1f%%)", FormatDuration(entry.totalSeconds).c_str(), entry.percentage);
+
+            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+
+            SelectObject(drawItemStruct->hDC, oldFont);
+
+            if (drawItemStruct->itemState & ODS_FOCUS)
+            {
+                DrawFocusRect(drawItemStruct->hDC, &drawItemStruct->rcItem);
+            }
+        }
+        else if (drawItemStruct->CtlID == IDC_PIECHART)
+        {
+            DrawPieChart(drawItemStruct->hDC, drawItemStruct->rcItem);
+        }
+    }
+    break;
+
+    case WM_MEASUREITEM:
+    {
+        LPMEASUREITEMSTRUCT measureItemStruct = (LPMEASUREITEMSTRUCT)lParam;
+        if (measureItemStruct->CtlID == IDC_RAW_TIME_ENTRY_LIST || measureItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
+        {
+            measureItemStruct->itemHeight = 50;
+        }
+    }
+    break;
+
+    case WM_DESTROY:
+        StopTracking(hWnd, /*noUiUpdates*/ true);
+
+        // Save on exit if option is enabled.
+        if (g_saveOnExit)
+        {
+            SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
+        }
+        DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
+        WTSUnRegisterSessionNotification(hWnd);
+        UpdateTimer();
+
+        DeleteObjectAndNullify(g_hLabelFont);
+        DeleteObjectAndNullify(g_hTimerFont);
+        DeleteObjectAndNullify(g_hMegaTimerFont);
+        PostQuitMessage(0);
+        break;
+
+    // In WindowProcedure, replace/add WM_ACTIVATE case (after WM_WTSSESSION_CHANGE around line 1412):
+    case WM_ACTIVATE:
+        if (LOWORD(wParam) == WA_INACTIVE)
+        {
+            // Window is being deactivated - save the current focus
+            HWND hwndFocus = GetFocus();
+            // Only save if it's a child of our window
+            if (hwndFocus && (hwndFocus == hWnd || IsChild(hWnd, hwndFocus)))
+            {
+                g_hwndLastFocus = hwndFocus;
+            }
+        }
+        else
+        {
+            // Window is being activated - restore focus
+            if (g_hwndLastFocus && IsWindow(g_hwndLastFocus) && IsWindowVisible(g_hwndLastFocus) && IsWindowEnabled(g_hwndLastFocus))
+            {
+                SetFocus(g_hwndLastFocus);
+            }
+            else
+            {
+                // Find first focusable control in tab order
+                HWND hwndFirstControl = GetNextDlgTabItem(hWnd, NULL, FALSE);
+                if (hwndFirstControl)
+                {
+                    SetFocus(hwndFirstControl);
+                }
+            }
+        }
+        return 0;
+
+    case WM_SETFOCUS:
+        // Main window received focus - delegate to appropriate child.
+        if (g_hwndLastFocus && IsWindow(g_hwndLastFocus) && IsWindowVisible(g_hwndLastFocus) && IsWindowEnabled(g_hwndLastFocus))
+        {
+            SetFocus(g_hwndLastFocus);
+        }
+        else
+        {
+            // Find first focusable control in tab order
+            HWND hwndFirstControl = GetNextDlgTabItem(hWnd, NULL, FALSE);
+            if (hwndFirstControl)
+            {
+                SetFocus(hwndFirstControl);
+            }
+        }
+        return 0;
+
+    default:
+        return DefWindowProc(hWnd, message, wParam, lParam);
+    }
+    return 0;
+}
+
+void WinEventHookProcedure(
+    HWINEVENTHOOK hWinEventHook,
+    DWORD event,
+    HWND hwnd,
+    LONG idObject,
+    LONG idChild,
+    DWORD dwEventThread,
+    DWORD dwmsEventTime
+    )
+{
+    if (event == EVENT_SYSTEM_FOREGROUND)
+    {
+        PostMessage(g_hWndMainWindow, WM_TIMER, TIMER_TRACK_ID, 0);
+
+        // Alternately we could have called RecordActiveWindowDetails() and RefreshUI() directly here,
+        // but posting a message minimizes the amount of time spent inside the event hook,
+        // and it avoids any potential weird edge cases or reentrancy issues that could arise
+        // from messing with the UI.
+    }
+}
+
+INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    UNREFERENCED_PARAMETER(lParam);
+    switch (message)
+    {
+    case WM_INITDIALOG:
+        return (INT_PTR)TRUE;
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
+        {
+            EndDialog(hDlg, LOWORD(wParam));
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    return (INT_PTR)FALSE;
+}
+
+INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+{
+    UNREFERENCED_PARAMETER(lParam);
+    switch (message)
+    {
+    case WM_INITDIALOG:
+    {
+        if (g_editingEntryIndex < 0 || g_editingEntryIndex >= (int)g_timeEntries.size())
+        {
+            EndDialog(hDlg, IDCANCEL);
+            return (INT_PTR)TRUE;
+        }
+
+        TimeEntry& entry = g_timeEntries[g_editingEntryIndex];
+
+        // If entry is empty (inserting new entry), change dialog title.
+        if (entry.windowTitle.empty() && entry.processName.empty())
+        {
+            SetWindowText(hDlg, L"Insert Time Entry");
+        }
+
+        SetDlgItemText(hDlg, IDC_EDIT_TITLE, entry.windowTitle.c_str());
+        SetDlgItemText(hDlg, IDC_EDIT_PROCESS, entry.processName.c_str());
+
+        HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
+        HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
+
+        DateTime_SetFormat(hDateTimeStart, L"yyyy'-'MM'-'dd HH':'mm':'ss");
+        DateTime_SetFormat(hDateTimeEnd, L"yyyy'-'MM'-'dd HH':'mm':'ss");
+
+        DateTime_SetSystemtime(hDateTimeStart, GDT_VALID, &entry.startTime);
+        DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &entry.endTime);
+
+        return (INT_PTR)TRUE;
+    }
+
+    case WM_COMMAND:
+        if (LOWORD(wParam) == IDOK)
+        {
+            if (g_editingEntryIndex >= 0 && g_editingEntryIndex < (int)g_timeEntries.size())
+            {
+                TimeEntry& entry = g_timeEntries[g_editingEntryIndex];
+
+                WCHAR buffer[256];
+                GetDlgItemText(hDlg, IDC_EDIT_TITLE, buffer, 256);
+                entry.windowTitle = buffer;
+
+                GetDlgItemText(hDlg, IDC_EDIT_PROCESS, buffer, 256);
+                entry.processName = buffer;
+
+                HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
+                HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
+
+                SYSTEMTIME startTime, endTime;
+                DateTime_GetSystemtime(hDateTimeStart, &startTime);
+                DateTime_GetSystemtime(hDateTimeEnd, &endTime);
+
+                if (!IsSystemTimeAfterOrEqual(endTime, startTime))
+                {
+                    endTime = startTime;
+                    DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &endTime);
+                    MessageBox(hDlg, L"End time cannot be before start time. End time has been set to match start time.", L"Invalid Time Range", MB_OK | MB_ICONWARNING);
+                }
+
+                entry.startTime = startTime;
+                entry.endTime = endTime;
+                entry.durationSeconds = CalculateDurationInSeconds(entry.startTime, entry.endTime);
+            }
+
+            EndDialog(hDlg, IDOK);
+            return (INT_PTR)TRUE;
+        }
+        else if (LOWORD(wParam) == IDCANCEL)
+        {
+            EndDialog(hDlg, IDCANCEL);
+            return (INT_PTR)TRUE;
+        }
+        break;
+    }
+    return (INT_PTR)FALSE;
+}
