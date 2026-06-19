@@ -869,6 +869,35 @@ void RecalculateAggregatedData()
     );
 }
 
+Gdiplus::Color g_chartColors[] =
+{
+    Gdiplus::Color(255,  66, 133, 244),
+    Gdiplus::Color(255, 234,  67,  53),
+    Gdiplus::Color(255, 251, 188,   5),
+    Gdiplus::Color(255,  52, 168,  83),
+    Gdiplus::Color(255, 171,  71, 188),
+    Gdiplus::Color(255, 255, 112,  67),
+    Gdiplus::Color(255,   0, 172, 193),
+    Gdiplus::Color(255, 158, 158, 158)
+};
+constexpr int colorCount = int(std::size(g_chartColors));
+
+// Get chart color appropriate to index.
+// Start with the base color, then blend it with increasing saturation toward gray for entries beyond the colors array.
+Gdiplus::Color GetChartColor(int i)
+{
+    Gdiplus::Color baseColor = g_chartColors[i % colorCount];
+    int cycleGroup = (int)(i / colorCount);
+    float grayBlendFactor = std::min(0.8f, cycleGroup * 0.5f);
+
+    BYTE r = (BYTE)(std::lerp<float>(baseColor.GetR(), 128, grayBlendFactor));
+    BYTE g = (BYTE)(std::lerp<float>(baseColor.GetG(), 128, grayBlendFactor));
+    BYTE b = (BYTE)(std::lerp<float>(baseColor.GetB(), 128, grayBlendFactor));
+
+    Gdiplus::Color color(255, r, g, b);
+    return color;
+};
+
 void DrawPieChart(HDC hdc, RECT& rect)
 {
     int width = rect.right - rect.left;
@@ -890,45 +919,13 @@ void DrawPieChart(HDC hdc, RECT& rect)
     int x = centerX - diameter / 2;
     int y = centerY - diameter / 2;
 
-    Gdiplus::Color colors[] =
-    {
-        Gdiplus::Color(255,  66, 133, 244),
-        Gdiplus::Color(255, 234,  67,  53),
-        Gdiplus::Color(255, 251, 188,   5),
-        Gdiplus::Color(255,  52, 168,  83),
-        Gdiplus::Color(255, 171,  71, 188),
-        Gdiplus::Color(255, 255, 112,  67),
-        Gdiplus::Color(255,   0, 172, 193),
-        Gdiplus::Color(255, 158, 158, 158)
-    };
-    constexpr int colorCount = int(std::size(colors));
-
     float startAngle = 0.0f;
-
-    // Get base color, and blend with increasing saturation toward gray for entries beyond the colors array.
-    auto getColor = [&](int i)
-    {
-        Gdiplus::Color baseColor = colors[i % colorCount];
-        int cycleGroup = (int)(i / colorCount);
-        float grayBlendFactor = std::min(0.8f, cycleGroup * 0.5f);
-
-        BYTE r = (BYTE)(std::lerp<float>(baseColor.GetR(), 128, grayBlendFactor));
-        BYTE g = (BYTE)(std::lerp<float>(baseColor.GetG(), 128, grayBlendFactor));
-        BYTE b = (BYTE)(std::lerp<float>(baseColor.GetB(), 128, grayBlendFactor));
-
-        Gdiplus::Color color(255, r, g, b);
-        return color;
-    };
 
     for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
     {
         float sweepAngle = g_aggregatedEntries[i].percentage * 3.6f;
-
-        Gdiplus::Color baseColor = colors[i % colorCount];
-        Gdiplus::SolidBrush brush(getColor(int(i)));
-
+        Gdiplus::SolidBrush brush(GetChartColor(int(i)));
         graphics.FillPie(&brush, x, y, diameter, diameter, startAngle, sweepAngle);
-
         startAngle += sweepAngle;
     }
 
@@ -944,6 +941,16 @@ void DrawPieChart(HDC hdc, RECT& rect)
         format.SetLineAlignment(Gdiplus::StringAlignmentCenter);
         Gdiplus::RectF layoutRect(0, 0, (float)width, (float)height);
         graphics.DrawString(L"No data to display", -1, &font, layoutRect, &format, &textBrush);
+
+        // If there are time entries but no aggregated entries, then all entries were filtered out.
+        // So show a warning message to lessen potential confusion, especially since it appears
+        // the timer is just frozen.
+        if (!g_timeEntries.empty() && (!g_showAwayTime || !g_showSelf))
+        {
+            Gdiplus::Font font2(L"Segoe UI", 12, Gdiplus::FontStyleBold);
+            layoutRect.Offset(0, 28);
+            graphics.DrawString(L"(⚠ away time or self time is excluded)", -1, &font2, layoutRect, &format, &textBrush);
+        }
     }
     else
     {
@@ -957,7 +964,7 @@ void DrawPieChart(HDC hdc, RECT& rect)
 
         for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
         {
-            Gdiplus::SolidBrush legendBrush(getColor(int(i)));
+            Gdiplus::SolidBrush legendBrush(GetChartColor(int(i)));
 
             graphics.FillRectangle(&legendBrush, legendX, int(legendY + i * legendItemHeight), 15, 15);
 
