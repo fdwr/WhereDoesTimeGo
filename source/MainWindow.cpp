@@ -331,19 +331,10 @@ void CreateControls(HWND hWnd)
     g_hwndTimerDisplay = CreateWindowEx(0, L"STATIC", L"00h 00m 00s", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE , 630, 550, 500, 60, hWnd, (HMENU)IDC_TIMER_DISPLAY, g_instanceHandle, nullptr);
     g_hwndLabelEmptyState = CreateWindowEx(0, L"STATIC", L"Click View / Show Entries, Pie Chart, or Timer to see them\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.", WS_CHILD | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)IDC_LABEL_EMPTY_STATE, g_instanceHandle, nullptr);
 
-    if (g_hLabelFont)
-    {
-        SendMessage(g_hwndLabelTimeEntries, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-        SendMessage(g_hwndLabelTasks, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-        SendMessage(g_hwndTimeEntriesList, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-        SendMessage(g_hwndAggregatedTimeEntriesList, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-        SendMessage(g_hwndLabelEmptyState, WM_SETFONT, (WPARAM)g_hLabelFont, TRUE);
-    }
-
-    if (g_hTimerFont)
-    {
-        SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hTimerFont, TRUE);
-    }
+    SetWindowFont(g_hwndLabelTimeEntries, g_hLabelFont, FALSE);
+    SetWindowFont(g_hwndLabelTasks, g_hLabelFont, FALSE);
+    SetWindowFont(g_hwndLabelEmptyState, g_hLabelFont, FALSE);
+    SetWindowFont(g_hwndTimerDisplay, g_hTimerFont, FALSE);
 
     // Subclass the listboxes to paint empty-state watermark messages.
     SetWindowSubclass(g_hwndTimeEntriesList, &EmptyListboxSubclassProcedure, 0, (DWORD_PTR)L"Time entries empty. Click Start to record.");
@@ -381,13 +372,13 @@ void ResizeControls(HWND hWnd)
         {
             // Use mega font for timer-only mode.
             // Position timer to fill entire available area.
-            SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hMegaTimerFont, TRUE);
+            SetWindowFont(g_hwndTimerDisplay, g_hMegaTimerFont, TRUE);
             SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, topMargin, availableWidth, availableHeight + labelHeight + spacing, SWP_NOZORDER | SWP_NOCOPYBITS);
         }
         else
         {
             // Use normal font if in normal mode.
-            SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hTimerFont, TRUE);
+            SetWindowFont(g_hwndTimerDisplay, g_hTimerFont, TRUE);
         }
     }
 
