@@ -103,6 +103,7 @@ BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow);
 LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+LRESULT CALLBACK EmptyListboxSubclassProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 void CALLBACK WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
 
 void CreateControls(HWND hWnd);
@@ -343,6 +344,10 @@ void CreateControls(HWND hWnd)
     {
         SendMessage(g_hwndTimerDisplay, WM_SETFONT, (WPARAM)g_hTimerFont, TRUE);
     }
+
+    // Subclass the listboxes to paint empty-state watermark messages.
+    SetWindowSubclass(g_hwndTimeEntriesList, &EmptyListboxSubclassProcedure, 0, (DWORD_PTR)L"Time entries empty. Click Start to record.");
+    SetWindowSubclass(g_hwndAggregatedTimeEntriesList, &EmptyListboxSubclassProcedure, 0, (DWORD_PTR)L"Tasks empty. Click Start to record.");
 }
 
 void ResizeControls(HWND hWnd)
@@ -404,13 +409,13 @@ void ResizeControls(HWND hWnd)
 
         // Time Entries list is on top.
         SetWindowPos(g_hwndLabelTimeEntries, nullptr, currentX, topMargin, listWidth, labelHeight, SWP_NOZORDER);
-        SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, listWidth, halfListHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, listWidth, halfListHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
 
         // Tasks list is below.
         int tasksLabelTop = listTopMargin + halfListHeight + spacing;
         int tasksListTop = tasksLabelTop + labelHeight + 2;
         SetWindowPos(g_hwndLabelTasks, nullptr, currentX, tasksLabelTop, listWidth, labelHeight, SWP_NOZORDER);
-        SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, tasksListTop, listWidth, halfListHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, tasksListTop, listWidth, halfListHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
 
         currentX += listWidth + spacing;
     }
@@ -733,6 +738,43 @@ std::wstring GetProcessName(HWND hWnd)
     }
 
     return L"Unknown";
+}
+
+LRESULT CALLBACK EmptyListboxSubclassProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
+{
+    if (uMsg == WM_PAINT)
+    {
+        // If the list is empty, draw centered text on opaque background using the message string stored in dwRefData.
+        int itemCount = (int)SendMessage(hWnd, LB_GETCOUNT, 0, 0);
+        if (itemCount == 0 || itemCount == LB_ERR)
+        {
+            PAINTSTRUCT ps;
+            HDC hdc = BeginPaint(hWnd, &ps);
+
+            RECT clientRect;
+            GetClientRect(hWnd, &clientRect);
+
+            const wchar_t* message = (const wchar_t*)dwRefData;
+            if (message != nullptr)
+            {
+                HFONT oldFont = (HFONT)SelectObject(hdc, g_hLabelFont);
+                SetBkColor(hdc, GetSysColor(COLOR_WINDOW));
+                SetBkMode(hdc, OPAQUE);
+                SetTextColor(hdc, GetSysColor(COLOR_GRAYTEXT));
+                DrawText(hdc, message, -1, &clientRect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+                SelectObject(hdc, oldFont);
+            }
+
+            EndPaint(hWnd, &ps);
+            return 0;
+        }
+    }
+    else if (uMsg == WM_NCDESTROY)
+    {
+        RemoveWindowSubclass(hWnd, EmptyListboxSubclassProcedure, uIdSubclass);
+    }
+
+    return DefSubclassProc(hWnd, uMsg, wParam, lParam);
 }
 
 void UpdateTimeEntriesList()
