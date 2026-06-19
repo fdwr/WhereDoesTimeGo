@@ -100,7 +100,7 @@ BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow);
 LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-void WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
+void CALLBACK WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
 
 void CreateControls(HWND hWnd);
 void ResizeControls(HWND hWnd);
@@ -897,13 +897,13 @@ void DrawPieChart(HDC hdc, RECT& rect)
 
     Gdiplus::Color colors[] =
     {
-        Gdiplus::Color(255, 66, 133, 244),
-        Gdiplus::Color(255, 234, 67, 53),
-        Gdiplus::Color(255, 251, 188, 5),
-        Gdiplus::Color(255, 52, 168, 83),
-        Gdiplus::Color(255, 171, 71, 188),
-        Gdiplus::Color(255, 255, 112, 67),
-        Gdiplus::Color(255, 0, 172, 193),
+        Gdiplus::Color(255,  66, 133, 244),
+        Gdiplus::Color(255, 234,  67,  53),
+        Gdiplus::Color(255, 251, 188,   5),
+        Gdiplus::Color(255,  52, 168,  83),
+        Gdiplus::Color(255, 171,  71, 188),
+        Gdiplus::Color(255, 255, 112,  67),
+        Gdiplus::Color(255,   0, 172, 193),
         Gdiplus::Color(255, 158, 158, 158)
     };
     constexpr int colorCount = int(std::size(colors));
@@ -2008,7 +2008,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
     return 0;
 }
 
-void WinEventHookProcedure(
+void CALLBACK WinEventHookProcedure(
     HWINEVENTHOOK hWinEventHook,
     DWORD event,
     HWND hwnd,
