@@ -395,18 +395,23 @@ void ResizeControls(HWND hWnd)
         listHeight -= (timerHeight + spacing);
     }
 
-    // Show/hide and position time entries (raw and aggregated lists).
+    // Vertically stack time entries (raw and aggregated lists).
     if (g_showTimeEntries)
     {
-        int singleListWidth = g_showPieChart ? (availableWidth / 4) : (availableWidth / 2 - spacing / 2);
+        int listWidth = g_showPieChart ? availableWidth / 2 : availableWidth;
+        int halfListHeight = (listHeight - labelHeight - spacing * 2) / 2;
 
-        SetWindowPos(g_hwndLabelTimeEntries, nullptr, currentX, topMargin, singleListWidth, labelHeight, SWP_NOZORDER);
-        SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, singleListWidth, listHeight, SWP_NOZORDER);
-        currentX += singleListWidth + spacing;
+        // Time Entries list is on top.
+        SetWindowPos(g_hwndLabelTimeEntries, nullptr, currentX, topMargin, listWidth, labelHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, listWidth, halfListHeight, SWP_NOZORDER);
 
-        SetWindowPos(g_hwndLabelTasks, nullptr, currentX, topMargin, singleListWidth, labelHeight, SWP_NOZORDER);
-        SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, listTopMargin, singleListWidth, listHeight, SWP_NOZORDER);
-        currentX += singleListWidth + spacing;
+        // Tasks list is below.
+        int tasksLabelTop = listTopMargin + halfListHeight + spacing;
+        int tasksListTop = tasksLabelTop + labelHeight + 2;
+        SetWindowPos(g_hwndLabelTasks, nullptr, currentX, tasksLabelTop, listWidth, labelHeight, SWP_NOZORDER);
+        SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, tasksListTop, listWidth, halfListHeight, SWP_NOZORDER);
+
+        currentX += listWidth + spacing;
     }
 
     // Show/hide and position pie chart and timer.
@@ -1878,20 +1883,17 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             textRect.left += 5;
             textRect.top += 3;
 
-            std::wstring text = entry.processName + L" - " + entry.windowTitle;
+            // Format: "YYYY-MM-DD HH:MM:SS (duration) - ProcessName - WindowTitle"
+            std::wstring text = FormatTime(entry.startTime) +
+                                L" (" + FormatDuration(entry.durationSeconds) + L") - " +
+                                entry.processName + L" - " +
+                                entry.windowTitle;
             if (text.length() > 255)
             {
                 text = text.substr(0, 252) + L"...";
             }
 
-            DrawText(drawItemStruct->hDC, text.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
-
-            textRect.top += 22;
-            std::wstring timeText = L"    " + FormatTime(entry.startTime) +
-                L" (" +
-                FormatDuration(entry.durationSeconds) +
-                L")";
-            DrawText(drawItemStruct->hDC, timeText.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+            DrawText(drawItemStruct->hDC, text.c_str(), -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
 
             SelectObject(drawItemStruct->hDC, oldFont);
 
@@ -1926,14 +1928,17 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             textRect.left += 5;
             textRect.top += 3;
 
-            DrawText(drawItemStruct->hDC, entry.processName.c_str(), -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+            // Format: "duration (percentage%) - ProcessName"
+            WCHAR buffer[256];
+            swprintf_s(
+                buffer,
+                L"%s (%04.1f%%) - %s",
+                FormatDuration(entry.totalSeconds).c_str(),
+                entry.percentage,
+                entry.processName.c_str()
+            );
 
-            textRect.top += 22;
-
-            WCHAR buffer[128];
-            swprintf_s(buffer, L"    %s   (%.1f%%)", FormatDuration(entry.totalSeconds).c_str(), entry.percentage);
-
-            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_TOP | DT_LEFT);
+            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
 
             SelectObject(drawItemStruct->hDC, oldFont);
 
@@ -1954,7 +1959,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         LPMEASUREITEMSTRUCT measureItemStruct = (LPMEASUREITEMSTRUCT)lParam;
         if (measureItemStruct->CtlID == IDC_RAW_TIME_ENTRY_LIST || measureItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
         {
-            measureItemStruct->itemHeight = 50;
+            measureItemStruct->itemHeight = 20; // Single line height
         }
     }
     break;
@@ -1963,7 +1968,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         StopTracking(hWnd, /*noUiUpdates*/ true);
 
         // Save on exit if option is enabled.
-        if (g_saveOnExit)
+        if (g_saveOnExit && !g_timeEntries.empty() && g_timeEntriesAreModified)
         {
             SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
         }
