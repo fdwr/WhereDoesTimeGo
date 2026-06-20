@@ -27,8 +27,8 @@ Just Windows 7+, x86 or x64 CPU.
 - **Ctrl+O**: Open CSV file
 - **Ctrl+S**: Save to CSV file
 - **Ctrl+Alt+S**: Save As
-- **Enter**: Start/stop time tracking
-- **Escape**: Stops time tracking
+- **Enter/F5**: Start/stop time tracking
+- **Escape/F8**: Stops time tracking
 - **Delete**: Remove selected time entries
 - **Double-click**/**F2**: Edit entry details
 
@@ -66,3 +66,13 @@ I looked over these - some were closer than others to my needs:
 - [DRYTRIX TimeTracker](https://github.com/DRYTRIX/TimeTracker) - ✅ does a lot of stuff I don't need (generating invoices? client billing?). ❌ Another web interface thing.
 - [Tockler](https://tockler.trimatech.dev/) - actually this *might* fit my needs (need to play with it), but I didn't find it until after I wrote this 😅.
 - [ProcrastiTracker](https://github.com/aardappel/procrastitracker) - another that might fit my needs, that I didn't find until *after* writing mine 😅.
+
+## Future Ideas
+
+Note I'm probably not going invest much more into this program (this took 3 days to write), but a few simple things remaining...
+
+- Clicking on a pie chart slice should highlight the task.
+- Clicking on a calendar box should highlight the time entry.
+- Manual mode when you select a different task to add time entries (like ATracker).
+- Allow entering custom tasks.
+- Compare CSV format with other CSV-capable apps, and either adapt my CSV fields for compatibility, or support loading them.
