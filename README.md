@@ -7,10 +7,12 @@ This program can record your active window usage and display a pie chart of prog
     🔍 Finding lost hours since 2026.
 
 ![Screenshot](documents/screenshot.png)
+![Screenshot](documents/screenshot-3-timer.png)
+![Screenshot](documents/screenshot-7.png)
 
 ## Dependencies
 
-Just Windows 7+.
+Just Windows 7+, x86 or x64 CPU.
 
 ## Features
 

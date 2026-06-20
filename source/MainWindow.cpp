@@ -5,7 +5,7 @@
 
 #define MAX_LOADSTRING 100
 #define TIMER_TRACK_ID 1
-#define DEFAULT_POLLING_INTERVAL 10 * 1000 // every 10 seconds.
+#define DEFAULT_POLLING_INTERVAL 60 * 1000 // every minute.
 #define WM_TRAYICON (WM_USER + 100)
 #define TRAY_ICON_ID 1
 
@@ -75,23 +75,25 @@ bool g_isUserAway = false;
 bool g_needsUIRefresh = false;
 bool g_showTimeEntries = true;
 bool g_showPieChart = true;
-bool g_showCalendar = false;
+bool g_showCalendar = true;
 bool g_showTimer = true;
 bool g_saveOnExit = false;
 bool g_showAwayTime = true;
 bool g_showSelf = true;
 int g_pollingInterval = DEFAULT_POLLING_INTERVAL;
+
 std::vector<TimeEntry> g_timeEntries;
 std::vector<AggregatedTimeEntry> g_aggregatedEntries;
-
 std::wstring g_timeEntriesFilePath;
 bool g_timeEntriesAreModified = false;
+SYSTEMTIME g_lastRecordedTime = {};
+SYSTEMTIME g_lastSelectedTime = {};
+TimeEntry g_editingEntry = {};
 
 ULONG_PTR g_gdiplusToken = 0;
 HFONT g_hLabelFont = nullptr;
 HFONT g_hTimerFont = nullptr;
 HFONT g_hMegaTimerFont = nullptr;
-int g_editingEntryIndex = -1;
 bool g_isTrayIconActive = false;
 
 ATOM MyRegisterClass(HINSTANCE hInstance);
@@ -119,7 +121,7 @@ void UpdateTimerDisplay();
 void RefreshUI();
 void SelectLastItemInRawList();
 
-void RecordActiveWindowDetails(bool shouldAddNewEntry);
+void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry);
 void RecordInactiveState();
 std::wstring GetProcessName(HWND hWnd);
 void UpdateWindowTitle();
@@ -149,6 +151,7 @@ void AddLapEntry(HWND hWnd);
 void DeleteSelectedEntries();
 void ClearAllEntries(HWND hWnd);
 
+bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2);
 UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
 std::wstring FormatTime(const SYSTEMTIME& time);
 std::wstring FormatDuration(UINT64 milliseconds);
@@ -171,6 +174,7 @@ int APIENTRY wWinMain(
     MyRegisterClass(hInstance);
 
     LoadSettings();
+
     if (!InitalizeInstance(hInstance, nCmdShow))
     {
         return FALSE;
@@ -218,9 +222,11 @@ ATOM MyRegisterClass(HINSTANCE hInstance)
     return RegisterClassExW(&wcex);
 }
 
-BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow)
+BOOL InitalizeInstance(HINSTANCE hInstance, int showCommand)
 {
     g_instanceHandle = hInstance;
+
+    GetLocalTime(&g_lastSelectedTime); // Set to now.
 
     INITCOMMONCONTROLSEX icex = {};
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
@@ -240,7 +246,7 @@ BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow)
 
     CreateControls(hWnd);
 
-    ShowWindow(hWnd, nCmdShow);
+    ShowWindow(hWnd, showCommand);
     UpdateWindow(hWnd);
 
     return TRUE;
@@ -460,11 +466,11 @@ void UpdateTrackingTimer()
     if (g_isTrackingTime && !g_isUserAway)
     {
         // If the window is active (and not minimized/hidden), update every second for visual interactivity.
-        // If minimized, update less frequently to save resources, since the user can't see the updates anyway.
         if (IsWindowVisible(g_hWndMainWindow))
         {
             SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, 1000, nullptr);
         }
+        // Otherwise if minimized/hidden, update less frequently to save resources, since the user can't see the updates anyway.
         else
         {
             SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, g_pollingInterval, nullptr);
@@ -495,7 +501,7 @@ void StartTracking(HWND hWnd)
             WINEVENT_OUTOFCONTEXT
         );
 
-        RecordActiveWindowDetails(/*shouldAddNewEntry*/ true);
+        RecordActiveWindowDetails(/*tryToMergeWithPreviousEntry*/ false);
         RefreshUI();
 
         // Update the toolbar Start and Stop buttons.
@@ -551,12 +557,13 @@ void ResumeTrackingBecauseBack(HWND hWnd)
     if (g_isTrackingTime)
     {
         UpdateTrackingTimer();
+        // Complete the away time entry.
         if (!g_timeEntries.empty())
         {
             TimeEntry& lastEntry = g_timeEntries.back();
             lastEntry.SetEndTimeToNow();
         }
-        RecordActiveWindowDetails(/*shouldAddNewEntry*/ true);
+        RecordActiveWindowDetails(/*tryToMergeWithPreviousEntry*/ false);
         RefreshUI();
     }
 }
@@ -596,42 +603,47 @@ bool WindowTitlesAreEquivalent(std::wstring_view first, std::wstring_view second
     return true;
 }
 
-// Records the active window's details (title, process, start time) either as a new time
-// entry (if shouldAddNewEntry is true, or if the active window has changed since the last)
-// or merges with the previous entry if it's the same window.
-void RecordActiveWindowDetails(bool shouldAddNewEntry)
+// Record the active window's details (title, process, start time), either extending the previous entry
+// or creating a new time entry if the active window has changed since the last.
+void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry)
 {
-    HWND hForeground = GetForegroundWindow();
-    if (!hForeground)
-    {
-        return;
-    }
-
-    // Check if this is an owned window (e.g., a dialog).
-    // If so, use the owner window instead to get the main application window
-    HWND hOwner = GetWindow(hForeground, GW_OWNER);
-    if (hOwner)
-    {
-        hForeground = hOwner;
-    }
-
     WCHAR title[256] = {};
-    GetWindowText(hForeground, title, 256);
+
+    HWND hForeground = GetForegroundWindow();
+    if (hForeground)
+    {
+        // Check if this is an owned window (e.g., a dialog).
+        // If so, use the owner window instead to get the main application window
+        HWND hOwner = GetWindow(hForeground, GW_OWNER);
+        if (hOwner)
+        {
+            hForeground = hOwner;
+        }
+        GetWindowText(hForeground, title, 256);
+    }
+
     std::wstring windowTitle = title;
     std::wstring processName = GetProcessName(hForeground);
 
     SetFileModifiedState(true);
 
-    // Either merge this entry with the previous one if it's the same window,
+    // Try to merge this entry with the previous one if it's the same window & process
+    // and the entry is consistent with the last recorded time (to rule out weird effects
+    // where you delete an entry in the middle of recording, which causes the last entry's
+    // end time to update to now and suddenly introduce a large gap).
     // or append a new entry.
-    if (!shouldAddNewEntry && !g_timeEntries.empty())
+    if (tryToMergeWithPreviousEntry && !g_timeEntries.empty())
     {
         TimeEntry& lastEntry = g_timeEntries.back();
 
-        if (lastEntry.processName == processName && WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
+        if (IsSystemTimeAfterOrEqual(lastEntry.endTime, g_lastRecordedTime) &&
+            lastEntry.processName == processName &&
+            WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
         {
             // Continue the previous entry since it's the same window.
             lastEntry.SetEndTimeToNow();
+            g_lastRecordedTime = lastEntry.endTime;
+
             return;
         }
         // Different window. So fall through to add a new entry...
@@ -643,6 +655,7 @@ void RecordActiveWindowDetails(bool shouldAddNewEntry)
         .processName = processName,
     };
     newEntry.ResetStartAndEndTimeToNow();
+    g_lastRecordedTime = newEntry.endTime;
 
     g_timeEntries.push_back(std::move(newEntry));
 }
@@ -660,6 +673,7 @@ void RecordInactiveState()
         .processName = L"Away",
     };
     newEntry.ResetStartAndEndTimeToNow();
+    g_lastRecordedTime = newEntry.endTime;
 
     g_timeEntries.push_back(std::move(newEntry));
     SetFileModifiedState(true);
@@ -938,6 +952,7 @@ void DrawPieChart(HDC hdc, RECT& rect)
 
     Gdiplus::Graphics graphics(memoryDC);
     graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf); // Fix ridiculous default. Pixel corners are logical.
 
     COLORREF backgroundColor = GetSysColor(COLOR_BTNFACE);
     graphics.Clear(Gdiplus::Color(255, GetRValue(backgroundColor), GetGValue(backgroundColor), GetBValue(backgroundColor)));
@@ -950,6 +965,7 @@ void DrawPieChart(HDC hdc, RECT& rect)
 
     float startAngle = 0.0f;
 
+    // Draw pie slices.
     for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
     {
         float sweepAngle = g_aggregatedEntries[i].percentage * 3.6f;
@@ -958,6 +974,7 @@ void DrawPieChart(HDC hdc, RECT& rect)
         startAngle += sweepAngle;
     }
 
+    // If empty, draw a full circle "no data" message.
     if (g_aggregatedEntries.empty())
     {
         Gdiplus::SolidBrush brush(Gdiplus::Color(255, 200, 200, 200));
@@ -981,8 +998,10 @@ void DrawPieChart(HDC hdc, RECT& rect)
             graphics.DrawString(L"(⚠ away time or self time is excluded)", -1, &font2, layoutRect, &format, &textBrush);
         }
     }
-    else
+    else // Draw the legend.
     {
+        graphics.SetSmoothingMode(Gdiplus::SmoothingModeNone);
+
         Gdiplus::Font font(L"Segoe UI", 10);
         Gdiplus::SolidBrush blackBrush(Gdiplus::Color::Black);
         Gdiplus::SolidBrush backgroundBrush(Gdiplus::Color(0xFF000000 | backgroundColor));
@@ -1090,10 +1109,9 @@ void DrawCalendar(HDC hdc, RECT& rect)
         graphics.DrawString(label, -1, &labelFont, labelRect, &centerFormat, &textBrush);
     }
 
-    // Get current day.
-    // TODO: Allow user to change the "current day" for the calendar view.
-    SYSTEMTIME now;
-    GetLocalTime(&now);
+    // Use the last selected time to determine which day to display.
+    SYSTEMTIME selectedTime;
+    SystemTimeToTzSpecificLocalTime(nullptr, &g_lastSelectedTime, &selectedTime);
 
     // Build a map from process name to aggregated entry index for color lookup.
     std::map<std::wstring_view, int> processToColorIndex;
@@ -1102,7 +1120,9 @@ void DrawCalendar(HDC hdc, RECT& rect)
         processToColorIndex[g_aggregatedEntries[i].processName] = (int)i;
     }
 
-    // Draw time entries for today.
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeHalf); // Fix ridiculous default. Pixel corners are logical.
+
+    // Draw time entries for the selected day.
     for (const auto& entry : g_timeEntries)
     {
         // Convert UTC times to local time for display.
@@ -1110,8 +1130,8 @@ void DrawCalendar(HDC hdc, RECT& rect)
         SystemTimeToTzSpecificLocalTime(nullptr, &entry.startTime, &localStart);
         SystemTimeToTzSpecificLocalTime(nullptr, &entry.endTime, &localEnd);
 
-        // Check if entry starts on today's date.
-        if (localStart.wYear != now.wYear || localStart.wMonth != now.wMonth || localStart.wDay != now.wDay)
+        // Check if entry starts on the selected day's date.
+        if (localStart.wYear != selectedTime.wYear || localStart.wMonth != selectedTime.wMonth || localStart.wDay != selectedTime.wDay)
             continue;
 
         // Calculate start and end positions within the day (in seconds from midnight).
@@ -1119,7 +1139,7 @@ void DrawCalendar(HDC hdc, RECT& rect)
         int endSeconds = localEnd.wHour * 3600 + localEnd.wMinute * 60 + localEnd.wSecond;
 
         // If end is on a different day, clamp to end of today.
-        if (localEnd.wYear != now.wYear || localEnd.wMonth != now.wMonth || localEnd.wDay != now.wDay)
+        if (localEnd.wYear != selectedTime.wYear || localEnd.wMonth != selectedTime.wMonth || localEnd.wDay != selectedTime.wDay)
         {
             endSeconds = 86400; // End of day (24 * 3600).
         }
@@ -1184,8 +1204,10 @@ void DrawCalendar(HDC hdc, RECT& rect)
         }
     }
 
+    graphics.SetPixelOffsetMode(Gdiplus::PixelOffsetModeDefault);
+
     // Draw grid lines.
-    Gdiplus::Pen gridPen(Gdiplus::Color(255, 220, 220, 220), 1.0f);
+    Gdiplus::Pen gridPen(Gdiplus::Color(128, 220, 220, 220), 1.0f);
     for (int hour = 0; hour <= 24; ++hour)
     {
         float y = interiorTop + (hour * interiorHeight / 24.0f);
@@ -1675,6 +1697,20 @@ void MergeFromCSV(HWND hWnd)
     }
 }
 
+void ClearAllEntries(HWND hWnd)
+{
+    if (g_timeEntries.empty())
+    {
+        return;
+    }
+
+    g_timeEntries.clear();
+    g_aggregatedEntries.clear();
+    SetFileModifiedState(true);
+
+    RefreshUI();
+}
+
 void DeleteSelectedEntries()
 {
     int count = (int)SendMessage(g_hwndTimeEntriesList, LB_GETSELCOUNT, 0, 0);
@@ -1698,89 +1734,84 @@ void DeleteSelectedEntries()
     }
 }
 
-void InsertEntry(HWND hWnd)
-{
-    // Create a new temporary entry with current time.
-    TimeEntry tempEntry =
-    {
-        .windowTitle = L"",
-        .processName = L"",
-    };
-    tempEntry.ResetStartAndEndTimeToNow();
-
-    // Append temporary entry to the end.
-    g_timeEntries.push_back(tempEntry);
-    g_editingEntryIndex = (int)g_timeEntries.size() - 1;
-
-    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
-    {
-        RefreshUI();
-        SelectLastItemInRawList();
-        SetFileModifiedState(true);
-    }
-    else if (g_editingEntryIndex < g_timeEntries.size())
-    {
-        // User cancelled - so remove the temporary entry.
-        g_timeEntries.erase(g_timeEntries.begin() + g_editingEntryIndex);
-    }
-
-    g_editingEntryIndex = -1;
-}
-
 void AddLapEntry(HWND hWnd)
 {
     if (g_timeEntries.empty())
     {
-        return;
+        // No existing entry to duplicate. So just add a new entry with the current time.
+        RecordActiveWindowDetails(/*tryToMergeWithPreviousEntry*/ false);
     }
-
-    // Duplicate the last entry, with empty time continuing from the previous entry.
-    g_timeEntries.reserve(g_timeEntries.size() + 1);
-    g_timeEntries.push_back(g_timeEntries.back());
-    g_timeEntries.back().SetStartTimeToEndTime();
+    else
+    {
+        // Duplicate the last entry, with empty time continuing from the previous entry.
+        g_timeEntries.reserve(g_timeEntries.size() + 1);
+        g_timeEntries.push_back(g_timeEntries.back());
+        g_timeEntries.back().SetStartTimeToEndTime();
+    }
+    g_lastRecordedTime = g_timeEntries.back().startTime;
 
     SetFileModifiedState(true);
     RefreshUI();
 }
 
-void ClearAllEntries(HWND hWnd)
+void InsertEntry(HWND hWnd)
 {
-    if (g_timeEntries.empty())
+    // Clear the editing entry, and set it to the current time before opening the dialog.
+    g_editingEntry = {};
+    g_editingEntry.ResetStartAndEndTimeToNow();
+
+    size_t selectedIndex = size_t(SendMessage(g_hwndTimeEntriesList, LB_GETCURSEL, 0, 0));
+
+    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
     {
-        return;
+        size_t insertionIndex = std::min(size_t(selectedIndex), g_timeEntries.size());
+        g_timeEntries.insert(g_timeEntries.begin() + insertionIndex, g_editingEntry);
+
+        RefreshUI();
+        SelectLastItemInRawList();
+        SetFileModifiedState(true);
     }
-
-    g_timeEntries.clear();
-    g_aggregatedEntries.clear();
-    SetFileModifiedState(true);
-
-    RefreshUI();
 }
 
 void EditSelectedEntry(HWND hWnd)
 {
-    int selectionCount = (int)SendMessage(g_hwndTimeEntriesList, LB_GETSELCOUNT, 0, 0);
-    if (selectionCount != 1)
-    {
-        MessageBox(hWnd, L"Please select exactly one time entry to edit", L"Edit Time Entry", MB_OK | MB_ICONINFORMATION);
-        return;
-    }
+    size_t selectedIndex = size_t(SendMessage(g_hwndTimeEntriesList, LB_GETCURSEL, 0, 0));
 
-    int selectedIndex = -1;
-    SendMessage(g_hwndTimeEntriesList, LB_GETSELITEMS, 1, (LPARAM)&selectedIndex);
-
-    if (selectedIndex >= 0 && selectedIndex < (int)g_timeEntries.size())
+    if (selectedIndex < g_timeEntries.size())
     {
-        g_editingEntryIndex = selectedIndex;
+        g_editingEntry = g_timeEntries[selectedIndex];
         if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
         {
-            SetFileModifiedState(true);
-            RefreshUI();
+            if (selectedIndex < g_timeEntries.size()) // Retest again in case something changed while the dialog was open, like deletion of the entry being edited.
+            {
+                g_timeEntries[selectedIndex] = std::move(g_editingEntry);
+                SetFileModifiedState(true);
+                RefreshUI();
+            }
         }
-        g_editingEntryIndex = -1;
     }
 }
 
+void UpdateLastSelectedTimeToSelectedEntry(size_t selectedIndex)
+{
+    if (selectedIndex < g_timeEntries.size())
+    {
+        const TimeEntry& timeEntry = g_timeEntries[selectedIndex];
+        bool dayChanged = g_lastSelectedTime.wYear  != timeEntry.startTime.wYear  ||
+                          g_lastSelectedTime.wMonth != timeEntry.startTime.wMonth ||
+                          g_lastSelectedTime.wDay   != timeEntry.startTime.wDay;
+
+        g_lastSelectedTime = timeEntry.startTime;
+
+        // If the day changed, invalidate the calendar to redraw.
+        if (dayChanged && g_showCalendar)
+        {
+            g_lastSelectedTime = timeEntry.startTime;
+            InvalidateRect(g_hwndCalendar, nullptr, TRUE);
+        }
+    }
+}
+ 
 void TimeEntry::ResetStartAndEndTimeToNow()
 {
     GetSystemTime(&startTime);
@@ -1823,17 +1854,13 @@ UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& timeStart, const SYSTEM
 
 bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
 {
-    FILETIME fileTime1, fileTime2;
-    SystemTimeToFileTime(&time1, &fileTime1);
-    SystemTimeToFileTime(&time2, &fileTime2);
-
-    ULARGE_INTEGER largeInt1, largeInt2;
-    largeInt1.LowPart  = fileTime1.dwLowDateTime;
-    largeInt1.HighPart = fileTime1.dwHighDateTime;
-    largeInt2.LowPart  = fileTime2.dwLowDateTime;
-    largeInt2.HighPart = fileTime2.dwHighDateTime;
-
-    return largeInt1.QuadPart >= largeInt2.QuadPart;
+    if (time1.wYear   != time2.wYear)   return time1.wYear >= time2.wYear;
+    if (time1.wMonth  != time2.wMonth)  return time1.wMonth >= time2.wMonth;
+    if (time1.wDay    != time2.wDay)    return time1.wDay >= time2.wDay;
+    if (time1.wHour   != time2.wHour)   return time1.wHour >= time2.wHour;
+    if (time1.wMinute != time2.wMinute) return time1.wMinute >= time2.wMinute;
+    if (time1.wSecond != time2.wSecond) return time1.wSecond >= time2.wSecond;
+    return time1.wMilliseconds >= time2.wMilliseconds;
 }
 
 std::wstring FormatTime(const SYSTEMTIME& time)
@@ -1897,9 +1924,9 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         break;
 
     case WM_TIMER:
-        if (wParam == TIMER_TRACK_ID)
+        if (wParam == TIMER_TRACK_ID && g_isTrackingTime)
         {
-            RecordActiveWindowDetails(/*shouldAddNewEntry*/ false);
+            RecordActiveWindowDetails(/*tryToMergeWithPreviousEntry*/ true);
             RefreshUI();
         }
         break;
@@ -1961,6 +1988,14 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         if (wmEvent == LBN_DBLCLK && wmId == IDC_RAW_TIME_ENTRY_LIST)
         {
             EditSelectedEntry(hWnd);
+            break;
+        }
+
+        if (wmEvent == LBN_SELCHANGE && wmId == IDC_RAW_TIME_ENTRY_LIST)
+        {
+            // Update g_lastSelectedTime when a time entry is selected.
+            size_t selectedIndex = size_t(SendMessage(g_hwndTimeEntriesList, LB_GETCURSEL, 0, 0));
+            UpdateLastSelectedTimeToSelectedEntry(selectedIndex);
             break;
         }
 
@@ -2269,7 +2304,7 @@ void CALLBACK WinEventHookProcedure(
     DWORD dwmsEventTime
     )
 {
-    if (event == EVENT_SYSTEM_FOREGROUND)
+    if (event == EVENT_SYSTEM_FOREGROUND && g_isTrackingTime)
     {
         PostMessage(g_hWndMainWindow, WM_TIMER, TIMER_TRACK_ID, 0);
 
@@ -2306,13 +2341,7 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
     {
     case WM_INITDIALOG:
     {
-        if (g_editingEntryIndex < 0 || g_editingEntryIndex >= (int)g_timeEntries.size())
-        {
-            EndDialog(hDlg, IDCANCEL);
-            return (INT_PTR)TRUE;
-        }
-
-        TimeEntry& entry = g_timeEntries[g_editingEntryIndex];
+        TimeEntry& entry = g_editingEntry;
 
         // If entry is empty (inserting new entry), change dialog title.
         if (entry.windowTitle.empty() && entry.processName.empty())
@@ -2341,38 +2370,35 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
     case WM_COMMAND:
         if (LOWORD(wParam) == IDOK)
         {
-            if (g_editingEntryIndex >= 0 && g_editingEntryIndex < (int)g_timeEntries.size())
+            TimeEntry& entry = g_editingEntry;
+
+            WCHAR buffer[256];
+            GetDlgItemText(hDlg, IDC_EDIT_TITLE, buffer, 256);
+            entry.windowTitle = buffer;
+
+            GetDlgItemText(hDlg, IDC_EDIT_PROCESS, buffer, 256);
+            entry.processName = buffer;
+
+            HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
+            HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
+
+            SYSTEMTIME localStartTime, localEndTime, startTime, endTime;
+            DateTime_GetSystemtime(hDateTimeStart, &startTime);
+            DateTime_GetSystemtime(hDateTimeEnd, &endTime);
+            if (!IsSystemTimeAfterOrEqual(endTime, startTime))
             {
-                TimeEntry& entry = g_timeEntries[g_editingEntryIndex];
-
-                WCHAR buffer[256];
-                GetDlgItemText(hDlg, IDC_EDIT_TITLE, buffer, 256);
-                entry.windowTitle = buffer;
-
-                GetDlgItemText(hDlg, IDC_EDIT_PROCESS, buffer, 256);
-                entry.processName = buffer;
-
-                HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
-                HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
-
-                SYSTEMTIME localStartTime, localEndTime, startTime, endTime;
-                DateTime_GetSystemtime(hDateTimeStart, &startTime);
-                DateTime_GetSystemtime(hDateTimeEnd, &endTime);
-                if (!IsSystemTimeAfterOrEqual(endTime, startTime))
-                {
-                    endTime = startTime;
-                    DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &endTime);
-                    MessageBox(hDlg, L"End time cannot be before start time. End time has been set to match start time.", L"Invalid Time Range", MB_OK | MB_ICONWARNING);
-                    return (INT_PTR)TRUE;
-                }
-               
-                SystemTimeToTzSpecificLocalTime(nullptr, &localStartTime, &startTime);
-                SystemTimeToTzSpecificLocalTime(nullptr, &localEndTime, &endTime);
-
-                entry.startTime = startTime;
-                entry.endTime = endTime;
-                entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
+                endTime = startTime;
+                DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &endTime);
+                MessageBox(hDlg, L"End time cannot be before start time. End time has been set to match start time.", L"Invalid Time Range", MB_OK | MB_ICONWARNING);
+                return (INT_PTR)TRUE;
             }
+               
+            TzSpecificLocalTimeToSystemTime(nullptr, &localStartTime, &startTime);
+            TzSpecificLocalTimeToSystemTime(nullptr, &localEndTime, &endTime);
+
+            entry.startTime = startTime;
+            entry.endTime = endTime;
+            entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
 
             EndDialog(hDlg, IDOK);
             return (INT_PTR)TRUE;
