@@ -86,8 +86,8 @@ std::vector<TimeEntry> g_timeEntries;
 std::vector<AggregatedTimeEntry> g_aggregatedEntries;
 std::wstring g_timeEntriesFilePath;
 bool g_timeEntriesAreModified = false;
-SYSTEMTIME g_lastRecordedTime = {};
-SYSTEMTIME g_lastSelectedTime = {};
+SYSTEMTIME g_lastRecordedTime = {}; // Note UTC, not local.
+SYSTEMTIME g_lastSelectedTime = {}; // Note UTC, not local.
 TimeEntry g_editingEntry = {};
 
 ULONG_PTR g_gdiplusToken = 0;
@@ -149,7 +149,7 @@ void EditSelectedEntry(HWND hWnd);
 void InsertEntry(HWND hWnd);
 void AddLapEntry(HWND hWnd);
 void DeleteSelectedEntries();
-void ClearAllEntries(HWND hWnd);
+void ClearAllEntries(HWND hWnd, bool isNewFile);
 
 bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2);
 UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
@@ -226,7 +226,7 @@ BOOL InitalizeInstance(HINSTANCE hInstance, int showCommand)
 {
     g_instanceHandle = hInstance;
 
-    GetLocalTime(&g_lastSelectedTime); // Set to now.
+    GetSystemTime(&g_lastSelectedTime); // Set to now.
 
     INITCOMMONCONTROLSEX icex = {};
     icex.dwSize = sizeof(INITCOMMONCONTROLSEX);
@@ -1095,7 +1095,7 @@ void DrawCalendar(HDC hdc, RECT& rect)
         float y = interiorTop + (hour * interiorHeight / 24.0f);
         WCHAR label[16];
         swprintf_s(label, L"%02d:00", hour);
-        Gdiplus::RectF labelRect(0.0f, y - 10.0f, (float)leftLabelWidth, 20.0f);
+        Gdiplus::RectF labelRect(0.0f, y, (float)leftLabelWidth, 20.0f);
         graphics.DrawString(label, -1, &labelFont, labelRect, &centerFormat, &textBrush);
     }
 
@@ -1110,8 +1110,8 @@ void DrawCalendar(HDC hdc, RECT& rect)
     }
 
     // Use the last selected time to determine which day to display.
-    SYSTEMTIME selectedTime;
-    SystemTimeToTzSpecificLocalTime(nullptr, &g_lastSelectedTime, &selectedTime);
+    SYSTEMTIME localSelectedTime;
+    SystemTimeToTzSpecificLocalTime(nullptr, &g_lastSelectedTime, &localSelectedTime);
 
     // Build a map from process name to aggregated entry index for color lookup.
     std::map<std::wstring_view, int> processToColorIndex;
@@ -1131,7 +1131,7 @@ void DrawCalendar(HDC hdc, RECT& rect)
         SystemTimeToTzSpecificLocalTime(nullptr, &entry.endTime, &localEnd);
 
         // Check if entry starts on the selected day's date.
-        if (localStart.wYear != selectedTime.wYear || localStart.wMonth != selectedTime.wMonth || localStart.wDay != selectedTime.wDay)
+        if (localStart.wYear != localSelectedTime.wYear || localStart.wMonth != localSelectedTime.wMonth || localStart.wDay != localSelectedTime.wDay)
             continue;
 
         // Calculate start and end positions within the day (in seconds from midnight).
@@ -1139,7 +1139,7 @@ void DrawCalendar(HDC hdc, RECT& rect)
         int endSeconds = localEnd.wHour * 3600 + localEnd.wMinute * 60 + localEnd.wSecond;
 
         // If end is on a different day, clamp to end of today.
-        if (localEnd.wYear != selectedTime.wYear || localEnd.wMonth != selectedTime.wMonth || localEnd.wDay != selectedTime.wDay)
+        if (localEnd.wYear != localSelectedTime.wYear || localEnd.wMonth != localSelectedTime.wMonth || localEnd.wDay != localSelectedTime.wDay)
         {
             endSeconds = 86400; // End of day (24 * 3600).
         }
@@ -1327,11 +1327,7 @@ void SetFileModifiedState(bool isModified)
 
 void NewFile(HWND hWnd)
 {
-    g_timeEntries.clear();
-    g_aggregatedEntries.clear();
-    SetTimeEntriesFilePath(L"");
-
-    RefreshUI();
+    ClearAllEntries(hWnd, /*isNewFile*/ true);
 }
 
 // Use the existing filename, if already saved before.
@@ -1648,8 +1644,12 @@ void LoadFromCSV(HWND hWnd)
         }
 
         g_timeEntries.clear();
-        ParseCSVEntries(fileContent, g_timeEntries);
+        ParseCSVEntries(fileContent, /*out*/ g_timeEntries);
         SetFileModifiedState(false);
+        if (!g_timeEntries.empty())
+        {
+            g_lastSelectedTime = g_timeEntries.back().endTime;
+        }
 
         RefreshUI();
         SelectLastItemInRawList();
@@ -1697,16 +1697,21 @@ void MergeFromCSV(HWND hWnd)
     }
 }
 
-void ClearAllEntries(HWND hWnd)
+void ClearAllEntries(HWND hWnd, bool isNewFile)
 {
-    if (g_timeEntries.empty())
-    {
-        return;
-    }
-
     g_timeEntries.clear();
     g_aggregatedEntries.clear();
-    SetFileModifiedState(true);
+    GetSystemTime(&g_lastRecordedTime); // Reset selected time to now.
+    g_lastSelectedTime = g_lastRecordedTime;
+
+    if (isNewFile)
+    {
+        SetTimeEntriesFilePath(L"");
+    }
+    else
+    {
+        SetFileModifiedState(true);
+    }
 
     RefreshUI();
 }
@@ -1796,17 +1801,22 @@ void UpdateLastSelectedTimeToSelectedEntry(size_t selectedIndex)
 {
     if (selectedIndex < g_timeEntries.size())
     {
+        // Must convert to local time before time comparison.
         const TimeEntry& timeEntry = g_timeEntries[selectedIndex];
-        bool dayChanged = g_lastSelectedTime.wYear  != timeEntry.startTime.wYear  ||
-                          g_lastSelectedTime.wMonth != timeEntry.startTime.wMonth ||
-                          g_lastSelectedTime.wDay   != timeEntry.startTime.wDay;
+        SYSTEMTIME localStartTime;
+        SYSTEMTIME localSelectedTime;
+        SystemTimeToTzSpecificLocalTime(nullptr, &timeEntry.startTime, &localStartTime);
+        SystemTimeToTzSpecificLocalTime(nullptr, &g_lastSelectedTime, &localSelectedTime);
+
+        bool dayChanged = localSelectedTime.wYear  != localStartTime.wYear  ||
+                          localSelectedTime.wMonth != localStartTime.wMonth ||
+                          localSelectedTime.wDay   != localStartTime.wDay;
 
         g_lastSelectedTime = timeEntry.startTime;
 
         // If the day changed, invalidate the calendar to redraw.
         if (dayChanged && g_showCalendar)
         {
-            g_lastSelectedTime = timeEntry.startTime;
             InvalidateRect(g_hwndCalendar, nullptr, TRUE);
         }
     }
@@ -1865,7 +1875,7 @@ bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
 
 std::wstring FormatTime(const SYSTEMTIME& time)
 {
-    // Convert UTC time to local time for display
+    // Convert UTC time to local time for display.
     SYSTEMTIME localTime;
     SystemTimeToTzSpecificLocalTime(nullptr, &time, &localTime);
 
@@ -2032,7 +2042,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             DeleteSelectedEntries();
             break;
         case IDM_CLEAR_ENTRIES:
-            ClearAllEntries(hWnd);
+            ClearAllEntries(hWnd, /*isNewFile*/ false);
             break;
         case IDM_SAVE_ON_EXIT:
             g_saveOnExit = !g_saveOnExit;
