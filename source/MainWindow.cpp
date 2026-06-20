@@ -26,9 +26,9 @@ namespace ToolbarIcon
         LapTimeTracking,
         StopTimeTracking,
         ShowTimeEntries,
-        ShowPieChart,
         ShowTimer,
-        LogsFolder,
+        ShowPieChart,
+        ShowCalendar,
     };
 }
 
@@ -72,6 +72,7 @@ HWND g_hWndToolbar = nullptr;
 HWND g_hwndTimeEntriesList = nullptr;
 HWND g_hwndAggregatedTimeEntriesList = nullptr;
 HWND g_hwndPieChart = nullptr;
+HWND g_hwndCalendar = nullptr;
 HWND g_hwndTimerDisplay = nullptr;
 HWND g_hwndLabelTimeEntries = nullptr;
 HWND g_hwndLabelTasks = nullptr;
@@ -84,6 +85,7 @@ bool g_isUserAway = false;
 bool g_needsUIRefresh = false;
 bool g_showTimeEntries = true;
 bool g_showPieChart = true;
+bool g_showCalendar = false;
 bool g_showTimer = true;
 bool g_saveOnExit = false;
 bool g_showAwayTime = true;
@@ -135,6 +137,7 @@ void SetTimeEntriesFilePath(const std::wstring& filePath);
 void SetFileModifiedState(bool isModified);
 
 void DrawPieChart(HDC hdc, RECT& rect);
+void DrawCalendar(HDC hdc, RECT& rect);
 
 bool WriteTextFile(const WCHAR* filename, std::wstring_view content);
 bool ReadTextFile(const WCHAR* filename, std::wstring& outContent);
@@ -323,8 +326,9 @@ void CreateControls(HWND hWnd)
         { ToolbarIcon::ClearTimeEntries, IDM_CLEAR_ENTRIES, TBSTATE_ENABLED, BTNS_BUTTON, {0}, 0, (INT_PTR)L"Clear" },
         { 0, 0, 0, BTNS_SEP, {0}, 0, 0 },
         { ToolbarIcon::ShowTimeEntries, IDM_SHOW_TIME_ENTRIES, BYTE(TBSTATE_ENABLED | (g_showTimeEntries ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Entries" },
-        { ToolbarIcon::ShowPieChart, IDM_SHOW_PIE_CHART, BYTE(TBSTATE_ENABLED | (g_showPieChart ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Pie Chart" },
         { ToolbarIcon::ShowTimer, IDM_SHOW_TIMER, BYTE(TBSTATE_ENABLED | (g_showTimer ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Timer" },
+        { ToolbarIcon::ShowPieChart, IDM_SHOW_PIE_CHART, BYTE(TBSTATE_ENABLED | (g_showPieChart ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Pie Chart" },
+        { ToolbarIcon::ShowCalendar, IDM_SHOW_CALENDAR, BYTE(TBSTATE_ENABLED | (g_showCalendar ? TBSTATE_CHECKED : 0)), BTNS_CHECK, {0}, 0, (INT_PTR)L"Calendar" },
     };
 
     SendMessage(g_hWndToolbar, TB_ADDBUTTONS, sizeof(toolbarButtons) / sizeof(TBBUTTON), (LPARAM)&toolbarButtons);
@@ -335,6 +339,7 @@ void CreateControls(HWND hWnd)
     g_hwndTimeEntriesList = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTBOX, nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_EXTENDEDSEL | LBS_MULTIPLESEL | LBS_NOINTEGRALHEIGHT | LBS_NODATA | WS_TABSTOP, 10, 70, 300, 480, hWnd, (HMENU)IDC_RAW_TIME_ENTRY_LIST, g_instanceHandle, nullptr);
     g_hwndAggregatedTimeEntriesList = CreateWindowEx(WS_EX_CLIENTEDGE, WC_LISTBOX, nullptr, WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOTIFY | LBS_OWNERDRAWFIXED | LBS_NOINTEGRALHEIGHT | LBS_NODATA | WS_TABSTOP, 320, 70, 300, 480, hWnd, (HMENU)IDC_AGGREGATED_TIME_ENTRY_LIST, g_instanceHandle, nullptr);
     g_hwndPieChart = CreateWindowEx(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, 630, 50, 500, 500, hWnd, (HMENU)IDC_PIECHART, g_instanceHandle, nullptr);
+    g_hwndCalendar = CreateWindowEx(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, 630, 50, 500, 500, hWnd, (HMENU)IDC_CALENDAR, g_instanceHandle, nullptr);
     g_hwndTimerDisplay = CreateWindowEx(0, L"STATIC", L"00h 00m 00s", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE , 630, 550, 500, 60, hWnd, (HMENU)IDC_TIMER_DISPLAY, g_instanceHandle, nullptr);
     g_hwndLabelEmptyState = CreateWindowEx(0, L"STATIC", L"Click View / Show Entries, Pie Chart, or Timer to see them\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.", WS_CHILD | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)IDC_LABEL_EMPTY_STATE, g_instanceHandle, nullptr);
 
@@ -370,7 +375,7 @@ void ResizeControls(HWND hWnd)
     int availableHeight = clientRect.bottom - topMargin - bottomMargin - labelHeight - spacing;
 
     // Check if only timer is visible.
-    bool onlyTimerVisible = g_showTimer && !g_showTimeEntries && !g_showPieChart;
+    bool onlyTimerVisible = g_showTimer && !g_showTimeEntries && !g_showPieChart && !g_showCalendar;
 
     if (g_showTimer)
     {
@@ -389,12 +394,14 @@ void ResizeControls(HWND hWnd)
         }
     }
 
+    int totalHorizontalElements = (g_showTimeEntries ? 1 : 0) + (g_showPieChart ? 1 : 0) + (g_showCalendar ? 1 : 0);
     int currentX = leftMargin;
     int listTopMargin = topMargin + labelHeight + 2;
     int listHeight = availableHeight;
+    int elementWidth = availableWidth / std::max(totalHorizontalElements, 1) - (spacing * (totalHorizontalElements - 1));
 
     // Reserve space for timer at bottom if showing timer without pie chart.
-    if (g_showTimer && !g_showPieChart && g_showTimeEntries)
+    if (g_showTimer && g_showTimeEntries && !g_showPieChart && !g_showCalendar)
     {
         listHeight -= (timerHeight + spacing);
     }
@@ -402,7 +409,7 @@ void ResizeControls(HWND hWnd)
     // Vertically stack time entries (raw and aggregated lists).
     if (g_showTimeEntries)
     {
-        int listWidth = g_showPieChart ? availableWidth / 2 : availableWidth;
+        int listWidth = elementWidth;
         int halfListHeight = (listHeight - labelHeight - spacing * 2) / 2;
 
         // Time Entries list is on top.
@@ -421,7 +428,7 @@ void ResizeControls(HWND hWnd)
     // Show/hide and position pie chart and timer.
     if (g_showPieChart)
     {
-        int pieChartWidth = availableWidth - (currentX - leftMargin);
+        int pieChartWidth = elementWidth;
         int pieChartHeight = availableHeight + labelHeight + 2;
 
         if (g_showTimer)
@@ -436,6 +443,8 @@ void ResizeControls(HWND hWnd)
             int timerTop = topMargin + pieChartHeight + spacing;
             SetWindowPos(g_hwndTimerDisplay, nullptr, currentX, timerTop, pieChartWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
         }
+
+        currentX += pieChartWidth + spacing;
     }
     else
     {
@@ -448,8 +457,17 @@ void ResizeControls(HWND hWnd)
         }
     }
 
+    // Show/hide and position calendar.
+    if (g_showCalendar)
+    {
+        int calendarWidth = elementWidth;
+        int calendarHeight = availableHeight + labelHeight + 2;
+
+        SetWindowPos(g_hwndCalendar, nullptr, currentX, topMargin, calendarWidth, calendarHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
+    }
+
     // Show/hide empty state message.
-    bool allHidden = !g_showTimeEntries && !g_showPieChart && !g_showTimer;
+    bool allHidden = !g_showTimeEntries && !g_showTimer && !g_showPieChart && !g_showCalendar;
     if (allHidden)
     {
         // Center the empty state label. Unfortunately SS_CENTERIMAGE only works with single lines. So, estimate here.
@@ -465,6 +483,7 @@ void ResizeControls(HWND hWnd)
     ShowWindow(g_hwndTimeEntriesList, g_showTimeEntries ? SW_SHOW : SW_HIDE);
     ShowWindow(g_hwndAggregatedTimeEntriesList, g_showTimeEntries ? SW_SHOW : SW_HIDE);
     ShowWindow(g_hwndPieChart, g_showPieChart ? SW_SHOW : SW_HIDE);
+    ShowWindow(g_hwndCalendar, g_showCalendar ? SW_SHOW : SW_HIDE);
     ShowWindow(g_hwndTimerDisplay, g_showTimer ? SW_SHOW : SW_HIDE);
     ShowWindow(g_hwndLabelEmptyState, allHidden ? SW_SHOW : SW_HIDE);
 }
@@ -853,6 +872,7 @@ void RefreshUI()
         UpdateAggregatedTimeEntriesList();
         UpdateTimerDisplay();
         InvalidateRect(g_hwndPieChart, nullptr, TRUE);
+        InvalidateRect(g_hwndCalendar, nullptr, TRUE);
 
         // If tracking is active, scroll to show the latest entry.
         if (g_isTrackingTime && !g_timeEntries.empty())
@@ -1035,6 +1055,182 @@ void DrawPieChart(HDC hdc, RECT& rect)
         }
     }
 
+    BitBlt(hdc, 0, 0, width, height, memoryDC, 0, 0, SRCCOPY);
+
+    SelectObject(memoryDC, oldBitmap);
+    DeleteObjectAndNullify(memoryBitmap);
+    DeleteDC(memoryDC);
+}
+
+void DrawCalendar(HDC hdc, RECT& rect)
+{
+    const int width  = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+
+    // Create memory DC for flicker-free drawing.
+    HDC memoryDC = CreateCompatibleDC(hdc);
+    HBITMAP memoryBitmap = CreateCompatibleBitmap(hdc, width, height);
+    HBITMAP oldBitmap = (HBITMAP)SelectObject(memoryDC, memoryBitmap);
+
+    Gdiplus::Graphics graphics(memoryDC);
+    graphics.SetSmoothingMode(Gdiplus::SmoothingModeAntiAlias);
+
+    COLORREF backgroundColor = GetSysColor(COLOR_BTNFACE);
+    graphics.Clear(Gdiplus::Color(255, GetRValue(backgroundColor), GetGValue(backgroundColor), GetBValue(backgroundColor)));
+
+    // Define margins and label sizes.
+    constexpr int leftLabelWidth = 60;    // Space for hour labels (00:00 - 23:00)
+    constexpr int topLabelHeight = 30;    // Space for minute labels (0, 5, 10, ..., 55)
+    constexpr int margin = 5;
+
+    // Calculate interior region.
+    int interiorLeft    = leftLabelWidth + margin;
+    int interiorTop     = topLabelHeight + margin;
+    int interiorRight   = width - margin;
+    int interiorBottom  = height - margin;
+    int interiorWidth   = interiorRight - interiorLeft;
+    int interiorHeight  = interiorBottom - interiorTop;
+
+    if (interiorWidth <= 0 || interiorHeight <= 0)
+        return;
+
+    Gdiplus::Font labelFont(L"Segoe UI", 9);
+    Gdiplus::SolidBrush textBrush(Gdiplus::Color(255, 0, 0, 0));
+    Gdiplus::StringFormat centerFormat;
+    centerFormat.SetAlignment(Gdiplus::StringAlignmentCenter);
+    centerFormat.SetLineAlignment(Gdiplus::StringAlignmentCenter);
+
+    // Draw hour labels on the left (00:00 to 23:00).
+    for (int hour = 0; hour < 24; ++hour)
+    {
+        float y = interiorTop + (hour * interiorHeight / 24.0f);
+        WCHAR label[16];
+        swprintf_s(label, L"%02d:00", hour);
+        Gdiplus::RectF labelRect(0.0f, y - 10.0f, (float)leftLabelWidth, 20.0f);
+        graphics.DrawString(label, -1, &labelFont, labelRect, &centerFormat, &textBrush);
+    }
+
+    // Draw minute labels on the top (0, 5, 10, ..., 55).
+    for (int minute = 0; minute < 60; minute += 5)
+    {
+        float x = interiorLeft + (minute * interiorWidth / 60.0f);
+        WCHAR label[16];
+        swprintf_s(label, L"%d", minute);
+        Gdiplus::RectF labelRect(x - 15.0f, 0.0f, 30.0f, (float)topLabelHeight);
+        graphics.DrawString(label, -1, &labelFont, labelRect, &centerFormat, &textBrush);
+    }
+
+    // Draw grid lines.
+    Gdiplus::Pen gridPen(Gdiplus::Color(255, 220, 220, 220), 1.0f);
+    for (int hour = 0; hour <= 24; ++hour)
+    {
+        float y = interiorTop + (hour * interiorHeight / 24.0f);
+        graphics.DrawLine(&gridPen, (float)interiorLeft, y, (float)interiorRight, y);
+    }
+    for (int minute = 0; minute <= 60; minute += 5)
+    {
+        float x = interiorLeft + (minute * interiorWidth / 60.0f);
+        graphics.DrawLine(&gridPen, x, (float)interiorTop, x, (float)interiorBottom);
+    }
+
+    // Get current day.
+    // TODO: Allow user to change the "current day" for the calendar view.
+    SYSTEMTIME now;
+    GetLocalTime(&now);
+
+    // Build a map from process name to aggregated entry index for color lookup.
+    std::map<std::wstring_view, int> processToColorIndex;
+    for (size_t i = 0; i < g_aggregatedEntries.size(); ++i)
+    {
+        processToColorIndex[g_aggregatedEntries[i].processName] = (int)i;
+    }
+
+    // Draw time entries for today.
+    for (const auto& entry : g_timeEntries)
+    {
+        // Convert UTC times to local time for display.
+        SYSTEMTIME localStart, localEnd;
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.startTime, &localStart);
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.endTime, &localEnd);
+
+        // Check if entry starts on today's date.
+        if (localStart.wYear != now.wYear || localStart.wMonth != now.wMonth || localStart.wDay != now.wDay)
+            continue;
+
+        // Calculate start and end positions within the day (in minutes from midnight).
+        int startMinutes = localStart.wHour * 60 + localStart.wMinute;
+        int endMinutes = localEnd.wHour * 60 + localEnd.wMinute;
+
+        // If end is on a different day, clamp to end of today.
+        if (localEnd.wYear != now.wYear || localEnd.wMonth != now.wMonth || localEnd.wDay != now.wDay)
+        {
+            endMinutes = 1440; // End of day.
+        }
+
+        // Clamp to [0, 1440] (24 hours * 60 minutes).
+        if (endMinutes > 1440)
+            endMinutes = 1440;
+        if (startMinutes < 0)
+            startMinutes = 0;
+
+        if (startMinutes >= endMinutes)
+            continue;
+
+        // Determine color from aggregated entries.
+        int colorIndex = 0;
+        auto it = processToColorIndex.find(entry.processName);
+        if (it != processToColorIndex.end())
+        {
+            colorIndex = it->second;
+        }
+        Gdiplus::Color color = GetChartColor(colorIndex);
+        Gdiplus::SolidBrush brush(color);
+        Gdiplus::Pen borderPen(Gdiplus::Color(255, 100, 100, 100), 1.0f);
+
+        // Draw boxes for each hour the entry spans.
+        int startHour = startMinutes / 60;
+        int endHour = (endMinutes - 1) / 60; // Subtract 1 to handle exact hour boundaries correctly.
+
+        for (int hour = startHour; hour <= endHour; ++hour)
+        {
+            if (hour >= 24)
+                break;
+
+            int hourStartMinutes = hour * 60;
+            int hourEndMinutes = (hour + 1) * 60;
+
+            // Clamp the entry to the current hour.
+            int clampedStart = std::max(startMinutes, hourStartMinutes);
+            int clampedEnd = std::min(endMinutes, hourEndMinutes);
+
+            if (clampedStart >= clampedEnd)
+                continue;
+
+            // Calculate pixel positions for this hour's segment.
+            float rowTop = interiorTop + (hour * interiorHeight / 24.0f);
+            float rowBottom = interiorTop + ((hour + 1) * interiorHeight / 24.0f);
+
+            // Calculate minute position within the hour [0, 60).
+            int minuteInHourStart = clampedStart - hourStartMinutes;
+            int minuteInHourEnd = clampedEnd - hourStartMinutes;
+
+            float boxLeft = interiorLeft + (minuteInHourStart / 60.0f) * interiorWidth;
+            float boxRight = interiorLeft + (minuteInHourEnd / 60.0f) * interiorWidth;
+
+            float boxWidth = boxRight - boxLeft;
+            float boxHeight = rowBottom - rowTop;
+
+            if (boxWidth > 0 && boxHeight > 0)
+            {
+                graphics.FillRectangle(&brush, boxLeft, rowTop, boxWidth, boxHeight);
+
+                // Draw a border for clarity.
+                graphics.DrawRectangle(&borderPen, boxLeft, rowTop, boxWidth, boxHeight);
+            }
+        }
+    }
+
+    // Blit to screen.
     BitBlt(hdc, 0, 0, width, height, memoryDC, 0, 0, SRCCOPY);
 
     SelectObject(memoryDC, oldBitmap);
@@ -1333,6 +1529,7 @@ void SaveSettings()
     file << L"[View]\n";
     file << L"ShowTimeEntries=" << g_showTimeEntries << L"\n";
     file << L"ShowPieChart=" << g_showPieChart << L"\n";
+    file << L"ShowCalendar=" << g_showCalendar << L"\n";
     file << L"ShowTimer=" << g_showTimer << L"\n";
     file << L"ShowAwayTime=" << g_showAwayTime << L"\n";
     file << L"ShowSelf=" << g_showSelf << L"\n";
@@ -1401,6 +1598,7 @@ void LoadSettings()
     
     g_showTimeEntries = ParseBool(settings[L"View.ShowTimeEntries"], true);
     g_showPieChart = ParseBool(settings[L"View.ShowPieChart"], true);
+    g_showCalendar = ParseBool(settings[L"View.ShowCalendar"], true);
     g_showTimer = ParseBool(settings[L"View.ShowTimer"], true);
     g_showAwayTime = ParseBool(settings[L"View.ShowAwayTime"], true);
     g_showSelf = ParseBool(settings[L"View.ShowSelf"], true);
@@ -1775,8 +1973,9 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         CheckMenuItem(hMenu, IDM_SAVE_ON_EXIT, MF_BYCOMMAND | (g_saveOnExit ? MF_CHECKED : MF_UNCHECKED));
         // Update checkmarks for View menu items.
         CheckMenuItem(hMenu, IDM_SHOW_TIME_ENTRIES, MF_BYCOMMAND | (g_showTimeEntries ? MF_CHECKED : MF_UNCHECKED));
-        CheckMenuItem(hMenu, IDM_SHOW_PIE_CHART, MF_BYCOMMAND | (g_showPieChart ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_SHOW_TIMER, MF_BYCOMMAND | (g_showTimer ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_PIE_CHART, MF_BYCOMMAND | (g_showPieChart ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_SHOW_CALENDAR, MF_BYCOMMAND | (g_showCalendar ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_SHOW_AWAY_TIME, MF_BYCOMMAND | (g_showAwayTime ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_SHOW_SELF, MF_BYCOMMAND | (g_showSelf ? MF_CHECKED : MF_UNCHECKED));
         // Update checkmarks for Track > Polling Frequency submenu.
@@ -1853,6 +2052,11 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         case IDM_SHOW_PIE_CHART:
             g_showPieChart = !g_showPieChart;
             SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_SHOW_PIE_CHART, MAKELONG(g_showPieChart, 0));
+            ResizeControls(hWnd);
+            break;
+        case IDM_SHOW_CALENDAR:
+            g_showCalendar = !g_showCalendar;
+            SendMessage(g_hWndToolbar, TB_CHECKBUTTON, IDM_SHOW_CALENDAR, MAKELONG(g_showCalendar, 0));
             ResizeControls(hWnd);
             break;
         case IDM_SHOW_TIMER:
@@ -1996,6 +2200,10 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         else if (drawItemStruct->CtlID == IDC_PIECHART)
         {
             DrawPieChart(drawItemStruct->hDC, drawItemStruct->rcItem);
+        }
+        else if (drawItemStruct->CtlID == IDC_CALENDAR)
+        {
+            DrawCalendar(drawItemStruct->hDC, drawItemStruct->rcItem);
         }
     }
     break;

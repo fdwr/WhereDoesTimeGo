@@ -33,25 +33,27 @@
 #define IDM_STOP_TIME_TRACKING      IDM_STOP   // Alias for backward compatibility
 #define IDM_SHOW_TIME_ENTRIES       121
 #define IDM_SHOW_PIE_CHART          122
-#define IDM_SHOW_TIMER              123
-#define IDM_LOGS_FOLDER             124
-#define IDM_SAVE_ON_EXIT            125
-#define IDM_SHOW_AWAY_TIME          126
-#define IDM_SHOW_SELF               127
-#define IDM_POLLING_1SEC            128
-#define IDM_POLLING_10SEC           129
-#define IDM_POLLING_60SEC           130
-#define IDM_POLLING_10MIN           131
-#define IDM_MINIMIZE_TO_TRAY        132
+#define IDM_SHOW_CALENDAR           123
+#define IDM_SHOW_TIMER              124
+#define IDM_LOGS_FOLDER             125
+#define IDM_SAVE_ON_EXIT            126
+#define IDM_SHOW_AWAY_TIME          127
+#define IDM_SHOW_SELF               128
+#define IDM_POLLING_1SEC            129
+#define IDM_POLLING_10SEC           130
+#define IDM_POLLING_60SEC           131
+#define IDM_POLLING_10MIN           132
+#define IDM_MINIMIZE_TO_TRAY        133
 
 #define IDC_TOOLBAR                1001
 #define IDC_RAW_TIME_ENTRY_LIST    1002
 #define IDC_AGGREGATED_TIME_ENTRY_LIST 1003
-#define IDC_PIECHART                1004
-#define IDC_TIMER_DISPLAY           1011
-#define IDC_LABEL_TIME_ENTRIES      1009
-#define IDC_LABEL_TASKS             1010
-#define IDC_LABEL_EMPTY_STATE       1012
+#define IDC_TIMER_DISPLAY           1004
+#define IDC_PIECHART                1005
+#define IDC_CALENDAR                1006
+#define IDC_LABEL_TIME_ENTRIES      1007
+#define IDC_LABEL_TASKS             1008
+#define IDC_LABEL_EMPTY_STATE       1009
 
 #define IDD_EDITENTRY               120
 #define IDC_EDIT_TITLE              1005

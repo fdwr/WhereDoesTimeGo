@@ -87,8 +87,9 @@ BEGIN
     POPUP "&View"
     BEGIN
         MENUITEM "Show Time &Entries",  IDM_SHOW_TIME_ENTRIES
-        MENUITEM "Show &Pie Chart",     IDM_SHOW_PIE_CHART
         MENUITEM "Show &Timer",         IDM_SHOW_TIMER
+        MENUITEM "Show &Calendar",      IDM_SHOW_CALENDAR
+        MENUITEM "Show &Pie Chart",     IDM_SHOW_PIE_CHART
         MENUITEM "", 0, MFT_SEPARATOR, 0
         MENUITEM "Show &Away Time",     IDM_SHOW_AWAY_TIME
         MENUITEM "&Show WhereDoesTimeGo.exe", IDM_SHOW_SELF
