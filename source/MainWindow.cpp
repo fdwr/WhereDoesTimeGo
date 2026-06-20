@@ -48,7 +48,7 @@ struct TimeEntry
     std::wstring processName;
     SYSTEMTIME startTime;
     SYSTEMTIME endTime;
-    DWORD durationSeconds;
+    UINT64 durationMilliseconds;
 
     void ResetStartAndEndTimeToNow();
     void SetStartTimeToEndTime();
@@ -58,7 +58,7 @@ struct TimeEntry
 struct AggregatedTimeEntry
 {
     std::wstring processName;
-    DWORD totalSeconds;
+    UINT64 totalMilliseconds;
     float percentage;
 };
 
@@ -156,9 +156,9 @@ void AddLapEntry(HWND hWnd);
 void DeleteSelectedEntries();
 void ClearAllEntries(HWND hWnd);
 
-DWORD CalculateDurationInSeconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
+UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
 std::wstring FormatTime(const SYSTEMTIME& time);
-std::wstring FormatDuration(DWORD seconds);
+std::wstring FormatDuration(UINT64 milliseconds);
 
 int APIENTRY wWinMain(
     _In_ HINSTANCE hInstance,
@@ -834,13 +834,13 @@ void UpdateAggregatedTimeEntriesList()
 void UpdateTimerDisplay()
 {
     // Calculate total time from all entries.
-    DWORD totalSeconds = 0;
+    UINT64 totalMilliseconds = 0;
     for (const auto& entry : g_aggregatedEntries)
     {
-        totalSeconds += entry.totalSeconds;
+        totalMilliseconds += entry.totalMilliseconds;
     }
 
-    std::wstring text = FormatDuration(totalSeconds);
+    std::wstring text = FormatDuration(totalMilliseconds);
     SetWindowText(g_hwndTimerDisplay, text.c_str());
 }
 
@@ -872,8 +872,8 @@ void RecalculateAggregatedData()
 {
     g_aggregatedEntries.clear();
 
-    std::map<std::wstring, DWORD> processTimeMap;
-    DWORD totalTime = 0;
+    std::map<std::wstring_view, UINT64> processTimeMap;
+    UINT64 totalTime = 0; // In milliseconds
 
     for (const auto& entry : g_timeEntries)
     {
@@ -887,23 +887,23 @@ void RecalculateAggregatedData()
             continue;
         }
 
-        processTimeMap[entry.processName] += entry.durationSeconds;
-        totalTime += entry.durationSeconds;
+        processTimeMap[entry.processName] += entry.durationMilliseconds;
+        totalTime += entry.durationMilliseconds;
     }
 
-    for (const auto& pair : processTimeMap)
+    for (const auto& [processName, milliseconds] : processTimeMap)
     {
         AggregatedTimeEntry aggregateTimeEntry = {};
-        aggregateTimeEntry.processName = pair.first;
-        aggregateTimeEntry.totalSeconds = pair.second;
-        aggregateTimeEntry.percentage = totalTime > 0 ? (float)pair.second / totalTime * 100.0f : 100.0f;
+        aggregateTimeEntry.processName = processName;
+        aggregateTimeEntry.totalMilliseconds = milliseconds;
+        aggregateTimeEntry.percentage = totalTime > 0 ? (float)milliseconds / totalTime * 100.0f : 100.0f;
         g_aggregatedEntries.push_back(aggregateTimeEntry);
     }
 
     std::ranges::sort(
         g_aggregatedEntries,
         [](const AggregatedTimeEntry& a, const AggregatedTimeEntry& b) {
-            return a.totalSeconds > b.totalSeconds;
+            return a.totalMilliseconds > b.totalMilliseconds;
         }
     );
 }
@@ -1291,7 +1291,7 @@ bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& ou
             &entry.endTime.wHour, &entry.endTime.wMinute, &entry.endTime.wSecond
         );
 
-        entry.durationSeconds = CalculateDurationInSeconds(entry.startTime, entry.endTime);
+        entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
 
         if (scannedStart == 6 && scannedEnd == 6)
         {
@@ -1620,22 +1620,22 @@ void TimeEntry::ResetStartAndEndTimeToNow()
 {
     GetSystemTime(&startTime);
     endTime = startTime;
-    durationSeconds = 0;
+    durationMilliseconds = 0;
 }
 
 void TimeEntry::SetStartTimeToEndTime()
 {
     startTime = endTime;
-    durationSeconds = 0;
+    durationMilliseconds = 0;
 }
 
 void TimeEntry::SetEndTimeToNow()
 {
     GetSystemTime(&endTime);
-    durationSeconds = CalculateDurationInSeconds(startTime, endTime);
+    durationMilliseconds = CalculateDurationInMilliseconds(startTime, endTime);
 }
 
-DWORD CalculateDurationInSeconds(const SYSTEMTIME& timeStart, const SYSTEMTIME& timeEnd)
+UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& timeStart, const SYSTEMTIME& timeEnd)
 {
     FILETIME fileTimeStart, fileTimeEnd;
     SystemTimeToFileTime(&timeStart, &fileTimeStart);
@@ -1653,7 +1653,7 @@ DWORD CalculateDurationInSeconds(const SYSTEMTIME& timeStart, const SYSTEMTIME& 
     }
 
     ULONGLONG diff = uliEnd.QuadPart - uliStart.QuadPart;
-    return (DWORD)((diff + 5000000) / 10000000); // Round to nearest second instead of truncating.
+    return diff / 10000; // Convert from 100-nanosecond intervals to milliseconds.
 }
 
 bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
@@ -1687,14 +1687,15 @@ std::wstring FormatTime(const SYSTEMTIME& time)
     return buffer;
 }
 
-std::wstring FormatDuration(DWORD totalSeconds)
+std::wstring FormatDuration(UINT64 totalMilliseconds)
 {
-    DWORD hours   = totalSeconds / 3600;
-    DWORD minutes = (totalSeconds % 3600) / 60;
-    DWORD seconds = totalSeconds % 60;
+    UINT64 totalSeconds = totalMilliseconds / 1000;
+    UINT64 hours   = totalSeconds / 3600;
+    UINT64 minutes = (totalSeconds % 3600) / 60;
+    UINT64 seconds = totalSeconds % 60;
 
     WCHAR buffer[64];
-    swprintf_s(buffer, L"%02dh %02dm %02ds", hours, minutes, seconds);
+    swprintf_s(buffer, L"%02lluh %02llum %02llus", hours, minutes, seconds);
     return buffer;
 }
 
@@ -1932,7 +1933,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
             // Format: "YYYY-MM-DD HH:MM:SS (duration) - ProcessName - WindowTitle"
             std::wstring text = FormatTime(entry.startTime) +
-                                L" (" + FormatDuration(entry.durationSeconds) + L") - " +
+                                L" (" + FormatDuration(entry.durationMilliseconds) + L") - " +
                                 entry.processName + L" - " +
                                 entry.windowTitle;
             if (text.length() > 255)
@@ -1978,7 +1979,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             swprintf_s(
                 buffer,
                 L"%s (%04.1f%%) - %s",
-                FormatDuration(entry.totalSeconds).c_str(),
+                FormatDuration(entry.totalMilliseconds).c_str(),
                 entry.percentage,
                 entry.processName.c_str()
             );
@@ -2189,7 +2190,7 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
 
                 entry.startTime = startTime;
                 entry.endTime = endTime;
-                entry.durationSeconds = CalculateDurationInSeconds(entry.startTime, entry.endTime);
+                entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
             }
 
             EndDialog(hDlg, IDOK);
