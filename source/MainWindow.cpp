@@ -1120,19 +1120,6 @@ void DrawCalendar(HDC hdc, RECT& rect)
         graphics.DrawString(label, -1, &labelFont, labelRect, &centerFormat, &textBrush);
     }
 
-    // Draw grid lines.
-    Gdiplus::Pen gridPen(Gdiplus::Color(255, 220, 220, 220), 1.0f);
-    for (int hour = 0; hour <= 24; ++hour)
-    {
-        float y = interiorTop + (hour * interiorHeight / 24.0f);
-        graphics.DrawLine(&gridPen, (float)interiorLeft, y, (float)interiorRight, y);
-    }
-    for (int minute = 0; minute <= 60; minute += 5)
-    {
-        float x = interiorLeft + (minute * interiorWidth / 60.0f);
-        graphics.DrawLine(&gridPen, x, (float)interiorTop, x, (float)interiorBottom);
-    }
-
     // Get current day.
     // TODO: Allow user to change the "current day" for the calendar view.
     SYSTEMTIME now;
@@ -1157,23 +1144,23 @@ void DrawCalendar(HDC hdc, RECT& rect)
         if (localStart.wYear != now.wYear || localStart.wMonth != now.wMonth || localStart.wDay != now.wDay)
             continue;
 
-        // Calculate start and end positions within the day (in minutes from midnight).
-        int startMinutes = localStart.wHour * 60 + localStart.wMinute;
-        int endMinutes = localEnd.wHour * 60 + localEnd.wMinute;
+        // Calculate start and end positions within the day (in seconds from midnight).
+        int startSeconds = localStart.wHour * 3600 + localStart.wMinute * 60 + localStart.wSecond;
+        int endSeconds = localEnd.wHour * 3600 + localEnd.wMinute * 60 + localEnd.wSecond;
 
         // If end is on a different day, clamp to end of today.
         if (localEnd.wYear != now.wYear || localEnd.wMonth != now.wMonth || localEnd.wDay != now.wDay)
         {
-            endMinutes = 1440; // End of day.
+            endSeconds = 86400; // End of day (24 * 3600).
         }
 
-        // Clamp to [0, 1440] (24 hours * 60 minutes).
-        if (endMinutes > 1440)
-            endMinutes = 1440;
-        if (startMinutes < 0)
-            startMinutes = 0;
+        // Clamp to [0, 86400] (24 hours * 3600 seconds).
+        if (endSeconds > 86400)
+            endSeconds = 86400;
+        if (startSeconds < 0)
+            startSeconds = 0;
 
-        if (startMinutes >= endMinutes)
+        if (startSeconds >= endSeconds)
             continue;
 
         // Determine color from aggregated entries.
@@ -1188,46 +1175,56 @@ void DrawCalendar(HDC hdc, RECT& rect)
         Gdiplus::Pen borderPen(Gdiplus::Color(255, 100, 100, 100), 1.0f);
 
         // Draw boxes for each hour the entry spans.
-        int startHour = startMinutes / 60;
-        int endHour = (endMinutes - 1) / 60; // Subtract 1 to handle exact hour boundaries correctly.
+        int startHour = startSeconds / 3600;
+        int endHour   = (endSeconds - 1) / 3600; // Subtract 1 to handle exact hour boundaries correctly.
 
         for (int hour = startHour; hour <= endHour; ++hour)
         {
             if (hour >= 24)
                 break;
 
-            int hourStartMinutes = hour * 60;
-            int hourEndMinutes = (hour + 1) * 60;
-
             // Clamp the entry to the current hour.
-            int clampedStart = std::max(startMinutes, hourStartMinutes);
-            int clampedEnd = std::min(endMinutes, hourEndMinutes);
+            int hourStartSeconds = hour * 3600;
+            int hourEndSeconds   = (hour + 1) * 3600;
+            int clampedStart     = std::max(startSeconds, hourStartSeconds);
+            int clampedEnd       = std::min(endSeconds, hourEndSeconds);
 
             if (clampedStart >= clampedEnd)
                 continue;
 
             // Calculate pixel positions for this hour's segment.
-            float rowTop = interiorTop + (hour * interiorHeight / 24.0f);
+            float rowTop    = interiorTop + (hour * interiorHeight / 24.0f);
             float rowBottom = interiorTop + ((hour + 1) * interiorHeight / 24.0f);
 
-            // Calculate minute position within the hour [0, 60).
-            int minuteInHourStart = clampedStart - hourStartMinutes;
-            int minuteInHourEnd = clampedEnd - hourStartMinutes;
-
+            // Calculate second position within the hour [0, 3600).
+            // Convert seconds within hour to minutes for horizontal positioning (0-60 range).
+            int secondInHourStart   = clampedStart - hourStartSeconds;
+            int secondInHourEnd     = clampedEnd - hourStartSeconds;
+            float minuteInHourStart = secondInHourStart / 60.0f;
+            float minuteInHourEnd   = secondInHourEnd / 60.0f;
             float boxLeft = interiorLeft + (minuteInHourStart / 60.0f) * interiorWidth;
             float boxRight = interiorLeft + (minuteInHourEnd / 60.0f) * interiorWidth;
-
             float boxWidth = boxRight - boxLeft;
             float boxHeight = rowBottom - rowTop;
 
             if (boxWidth > 0 && boxHeight > 0)
             {
                 graphics.FillRectangle(&brush, boxLeft, rowTop, boxWidth, boxHeight);
-
-                // Draw a border for clarity.
-                graphics.DrawRectangle(&borderPen, boxLeft, rowTop, boxWidth, boxHeight);
             }
         }
+    }
+
+    // Draw grid lines.
+    Gdiplus::Pen gridPen(Gdiplus::Color(255, 220, 220, 220), 1.0f);
+    for (int hour = 0; hour <= 24; ++hour)
+    {
+        float y = interiorTop + (hour * interiorHeight / 24.0f);
+        graphics.DrawLine(&gridPen, (float)interiorLeft, y, (float)interiorRight, y);
+    }
+    for (int minute = 0; minute <= 60; minute += 5)
+    {
+        float x = interiorLeft + (minute * interiorWidth / 60.0f);
+        graphics.DrawLine(&gridPen, x, (float)interiorTop, x, (float)interiorBottom);
     }
 
     // Blit to screen.
