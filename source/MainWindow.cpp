@@ -119,7 +119,7 @@ void UpdateTimerDisplay();
 void RefreshUI();
 void SelectLastItemInRawList();
 
-void RecordActiveWindowDetails();
+void RecordActiveWindowDetails(bool shouldAddNewEntry);
 void RecordInactiveState();
 std::wstring GetProcessName(HWND hWnd);
 void UpdateWindowTitle();
@@ -518,7 +518,7 @@ void StartTracking(HWND hWnd)
             WINEVENT_OUTOFCONTEXT
         );
 
-        RecordActiveWindowDetails();
+        RecordActiveWindowDetails(/*shouldAddNewEntry*/ true);
         RefreshUI();
 
         // Update the toolbar Start and Stop buttons.
@@ -579,7 +579,7 @@ void ResumeTrackingBecauseBack(HWND hWnd)
             TimeEntry& lastEntry = g_timeEntries.back();
             lastEntry.SetEndTimeToNow();
         }
-        RecordActiveWindowDetails();
+        RecordActiveWindowDetails(/*shouldAddNewEntry*/ true);
         RefreshUI();
     }
 }
@@ -619,7 +619,10 @@ bool WindowTitlesAreEquivalent(std::wstring_view first, std::wstring_view second
     return true;
 }
 
-void RecordActiveWindowDetails()
+// Records the active window's details (title, process, start time) either as a new time
+// entry (if shouldAddNewEntry is true, or if the active window has changed since the last)
+// or merges with the previous entry if it's the same window.
+void RecordActiveWindowDetails(bool shouldAddNewEntry)
 {
     HWND hForeground = GetForegroundWindow();
     if (!hForeground)
@@ -644,7 +647,7 @@ void RecordActiveWindowDetails()
 
     // Either merge this entry with the previous one if it's the same window,
     // or append a new entry.
-    if (!g_timeEntries.empty())
+    if (!shouldAddNewEntry && !g_timeEntries.empty())
     {
         TimeEntry& lastEntry = g_timeEntries.back();
 
@@ -1919,7 +1922,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
     case WM_TIMER:
         if (wParam == TIMER_TRACK_ID)
         {
-            RecordActiveWindowDetails();
+            RecordActiveWindowDetails(/*shouldAddNewEntry*/ false);
             RefreshUI();
         }
         break;
