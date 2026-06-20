@@ -1802,7 +1802,7 @@ void EditSelectedEntry(HWND hWnd)
     if (selectedIndex >= 0 && selectedIndex < (int)g_timeEntries.size())
     {
         g_editingEntryIndex = selectedIndex;
-        if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, EditEntryDialog) == IDOK)
+        if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
         {
             SetFileModifiedState(true);
             RefreshUI();
@@ -2359,8 +2359,11 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         DateTime_SetFormat(hDateTimeStart, L"yyyy'-'MM'-'dd HH':'mm':'ss");
         DateTime_SetFormat(hDateTimeEnd, L"yyyy'-'MM'-'dd HH':'mm':'ss");
 
-        DateTime_SetSystemtime(hDateTimeStart, GDT_VALID, &entry.startTime);
-        DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &entry.endTime);
+        SYSTEMTIME localStartTime, localEndTime;
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.startTime, &localStartTime);
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.endTime, &localEndTime);
+        DateTime_SetSystemtime(hDateTimeStart, GDT_VALID, &localStartTime);
+        DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &localEndTime);
 
         return (INT_PTR)TRUE;
     }
@@ -2382,16 +2385,19 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
                 HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
                 HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
 
-                SYSTEMTIME startTime, endTime;
+                SYSTEMTIME localStartTime, localEndTime, startTime, endTime;
                 DateTime_GetSystemtime(hDateTimeStart, &startTime);
                 DateTime_GetSystemtime(hDateTimeEnd, &endTime);
-
                 if (!IsSystemTimeAfterOrEqual(endTime, startTime))
                 {
                     endTime = startTime;
                     DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &endTime);
                     MessageBox(hDlg, L"End time cannot be before start time. End time has been set to match start time.", L"Invalid Time Range", MB_OK | MB_ICONWARNING);
+                    return (INT_PTR)TRUE;
                 }
+               
+                SystemTimeToTzSpecificLocalTime(nullptr, &localStartTime, &startTime);
+                SystemTimeToTzSpecificLocalTime(nullptr, &localEndTime, &endTime);
 
                 entry.startTime = startTime;
                 entry.endTime = endTime;
