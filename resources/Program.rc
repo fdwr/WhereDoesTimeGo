@@ -65,8 +65,8 @@ BEGIN
     END
     POPUP "&Edit"
     BEGIN
-        MENUITEM "&Insert Entry...",    IDM_INSERT
         MENUITEM "&Edit Selected\tF2",  IDM_EDIT
+        MENUITEM "&Insert Entry...\tIns", IDM_INSERT
         MENUITEM "&Delete Selected\tDel", IDM_DELETE
         MENUITEM "&Clear All Entries",  IDM_CLEAR_ENTRIES
     END
@@ -115,6 +115,7 @@ BEGIN
     VK_F5,          IDM_START,                  VIRTKEY
     VK_F8,          IDM_STOP,                   VIRTKEY
     VK_F2,          IDM_EDIT,                   VIRTKEY
+    VK_INSERT,      IDM_INSERT,                 VIRTKEY
     VK_DELETE,      IDM_DELETE,                 VIRTKEY
 END
 

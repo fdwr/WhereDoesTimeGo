@@ -1547,16 +1547,16 @@ void InsertEntry(HWND hWnd)
     g_timeEntries.push_back(tempEntry);
     g_editingEntryIndex = (int)g_timeEntries.size() - 1;
 
-    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, EditEntryDialog) == IDOK)
+    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
     {
         RefreshUI();
         SelectLastItemInRawList();
         SetFileModifiedState(true);
     }
-    else
+    else if (g_editingEntryIndex < g_timeEntries.size())
     {
         // User cancelled - so remove the temporary entry.
-        g_timeEntries.pop_back();
+        g_timeEntries.erase(g_timeEntries.begin() + g_editingEntryIndex);
     }
 
     g_editingEntryIndex = -1;
