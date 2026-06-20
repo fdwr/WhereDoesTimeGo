@@ -48,7 +48,7 @@ IDB_TOOLBAR                 BITMAP      "toolbar-icons.bmp"
 // Menu
 //
 
-IDC_WHEREDOESTIMEGO MENU
+IDC_WHEREDOESTIMEGO MENUEX
 BEGIN
     POPUP "&File"
     BEGIN
@@ -57,10 +57,10 @@ BEGIN
         MENUITEM "&Merge...",           IDM_MERGE
         MENUITEM "&Save\tCtrl+S",       IDM_SAVE
         MENUITEM "Save &As...\tCtrl+Alt+S", IDM_SAVEAS
-        MENUITEM SEPARATOR
+        MENUITEM "", 0, MFT_SEPARATOR, 0
         MENUITEM "Save on E&xit",       IDM_SAVE_ON_EXIT
         MENUITEM "Open settings folder", IDM_LOGS_FOLDER
-        MENUITEM SEPARATOR
+        MENUITEM "", 0, MFT_SEPARATOR, 0
         MENUITEM "E&xit",               IDM_EXIT
     END
     POPUP "&Edit"
@@ -75,7 +75,7 @@ BEGIN
         MENUITEM "&Start Tracking\tEnter", IDM_START
         MENUITEM "S&top Tracking\tEscape", IDM_STOP
         MENUITEM "Add &Lap",            IDM_LAP
-        MENUITEM SEPARATOR
+        MENUITEM "", 0, MFT_SEPARATOR, 0
         POPUP "Polling &Frequency"
         BEGIN
             MENUITEM "1 Second",        IDM_POLLING_1SEC
@@ -89,14 +89,11 @@ BEGIN
         MENUITEM "Show Time &Entries",  IDM_SHOW_TIME_ENTRIES
         MENUITEM "Show &Pie Chart",     IDM_SHOW_PIE_CHART
         MENUITEM "Show &Timer",         IDM_SHOW_TIMER
-        MENUITEM SEPARATOR
+        MENUITEM "", 0, MFT_SEPARATOR, 0
         MENUITEM "Show &Away Time",     IDM_SHOW_AWAY_TIME
         MENUITEM "&Show WhereDoesTimeGo.exe", IDM_SHOW_SELF
     END
-    POPUP "&Help"
-    BEGIN
-        MENUITEM "&About ...",          IDM_ABOUT
-    END
+    MENUITEM "Minimize To Tray",        IDM_MINIMIZE_TO_TRAY, MFT_RIGHTJUSTIFY
 END
 
 

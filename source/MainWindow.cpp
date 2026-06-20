@@ -6,6 +6,8 @@
 #define MAX_LOADSTRING 100
 #define TIMER_TRACK_ID 1
 #define DEFAULT_POLLING_INTERVAL 10 * 1000 // every 10 seconds.
+#define WM_TRAYICON (WM_USER + 100)
+#define TRAY_ICON_ID 1
 
 namespace ToolbarIcon
 {
@@ -97,6 +99,7 @@ HFONT g_hLabelFont = nullptr;
 HFONT g_hTimerFont = nullptr;
 HFONT g_hMegaTimerFont = nullptr;
 int g_editingEntryIndex = -1;
+bool g_isTrayIconActive = false;
 
 ATOM MyRegisterClass(HINSTANCE hInstance);
 BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow);
@@ -108,6 +111,9 @@ void CALLBACK WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HW
 
 void CreateControls(HWND hWnd);
 void ResizeControls(HWND hWnd);
+void MinimizeToSystemTray(HWND hWnd);
+void RestoreFromSystemTray(HWND hWnd);
+void RemoveSystemTrayIcon(HWND hWnd);
 
 void StartTracking(HWND hWnd);
 void StopTracking(HWND hWnd, bool noUiUpdates = false);
@@ -466,15 +472,15 @@ void UpdateTrackingTimer()
 {
     if (g_isTrackingTime && !g_isUserAway)
     {
-        // If the window is active (and not minimized), update every second for more real-time accuracy.
+        // If the window is active (and not minimized/hidden), update every second for visual interactivity.
         // If minimized, update less frequently to save resources, since the user can't see the updates anyway.
-        if (IsIconic(g_hWndMainWindow))
+        if (IsWindowVisible(g_hWndMainWindow))
         {
-            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, 1000, nullptr);
         }
         else
         {
-            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, 1000, nullptr);
+            SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, g_pollingInterval, nullptr);
         }
     }
     else
@@ -1444,6 +1450,7 @@ void LoadFromCSV(HWND hWnd)
 
     if (GetOpenFileName(&openFileName))
     {
+        StopTracking(hWnd); // It's weird to automatically start tracking a file that's just being loaded.
         SetTimeEntriesFilePath(openFileName.lpstrFile);
 
         std::wstring fileContent;
@@ -1879,11 +1886,21 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 ShellExecute(nullptr, L"explore", settingsPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             }
             break;
+        case IDM_MINIMIZE_TO_TRAY:
+            MinimizeToSystemTray(hWnd);
+            break;
         default:
             return DefWindowProc(hWnd, message, wParam, lParam);
         }
     }
     break;
+
+    case WM_TRAYICON:
+        if (lParam == WM_LBUTTONDOWN || lParam == WM_LBUTTONDBLCLK)
+        {
+            RestoreFromSystemTray(hWnd);
+        }
+        break;
 
     case WM_DRAWITEM:
     {
@@ -1996,9 +2013,10 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         {
             SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
         }
+
         DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
         WTSUnRegisterSessionNotification(hWnd);
-        UpdateTrackingTimer();
+        RemoveSystemTrayIcon(hWnd);
 
         DeleteObjectAndNullify(g_hLabelFont);
         DeleteObjectAndNullify(g_hTimerFont);
@@ -2180,4 +2198,62 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         break;
     }
     return (INT_PTR)FALSE;
+}
+
+void MinimizeToSystemTray(HWND hWnd)
+{
+    if (g_isTrayIconActive)
+    {
+        return;
+    }
+
+    NOTIFYICONDATA notifyIconData =
+    {
+        .cbSize = sizeof(NOTIFYICONDATA),
+        .hWnd = hWnd,
+        .uID = TRAY_ICON_ID,
+        .uFlags = NIF_ICON | NIF_MESSAGE | NIF_TIP,
+        .uCallbackMessage = WM_TRAYICON,
+        .hIcon = LoadIcon(g_instanceHandle, MAKEINTRESOURCE(IDI_WHEREDOESTIMEGO)),
+    };
+    wcscpy_s(notifyIconData.szTip, L"WhereDoesTimeGo - Click to restore");
+
+    if (!Shell_NotifyIcon(NIM_ADD, &notifyIconData))
+    {
+        return; // Failed for some reason - do NOT hide main window.
+    }
+
+    g_isTrayIconActive = true;
+    ShowWindow(hWnd, SW_HIDE);
+    UpdateTrackingTimer(); // Restore the timer to normal frequency.
+}
+
+void RemoveSystemTrayIcon(HWND hWnd)
+{
+    if (!g_isTrayIconActive)
+    {
+        return;
+    }
+
+    NOTIFYICONDATA notifyIconData =
+    {
+        .cbSize = sizeof(NOTIFYICONDATA),
+        .hWnd = hWnd,
+        .uID = TRAY_ICON_ID,
+    };
+
+    Shell_NotifyIcon(NIM_DELETE, &notifyIconData);
+    g_isTrayIconActive = false;
+}
+
+void RestoreFromSystemTray(HWND hWnd)
+{
+    if (!g_isTrayIconActive)
+    {
+        return;
+    }
+
+    RemoveSystemTrayIcon(hWnd);
+    ShowWindow(hWnd, SW_RESTORE);
+    UpdateTrackingTimer(); // Restore the timer to normal frequency.
 }

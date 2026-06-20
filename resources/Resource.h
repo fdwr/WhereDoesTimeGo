@@ -42,6 +42,7 @@
 #define IDM_POLLING_10SEC       129
 #define IDM_POLLING_60SEC       130
 #define IDM_POLLING_10MIN       131
+#define IDM_MINIMIZE_TO_TRAY    132
 
 #define IDC_TOOLBAR				1001
 #define IDC_RAW_TIME_ENTRY_LIST				1002
