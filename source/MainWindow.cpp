@@ -32,16 +32,6 @@ namespace ToolbarIcon
     };
 }
 
-namespace TimeTrackingMode
-{
-    enum TimeTrackingMode
-    {
-        ActiveWindow,       // Keep track of the active window and its process.
-        ManualCategories,   // Record time in user-defined categories, without tracking specific windows or processes.
-        Timer,              // Simple timer mode where categories are hidden, you see a large timer.
-    };
-}
-
 struct TimeEntry
 {
     std::wstring windowTitle;
@@ -637,7 +627,7 @@ void RecordActiveWindowDetails()
         return;
     }
 
-    // Check if this is an owned window (e.g., a dialog)
+    // Check if this is an owned window (e.g., a dialog).
     // If so, use the owner window instead to get the main application window
     HWND hOwner = GetWindow(hForeground, GW_OWNER);
     if (hOwner)
