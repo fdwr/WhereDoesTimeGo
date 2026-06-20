@@ -215,7 +215,7 @@ END
 STRINGTABLE
 BEGIN
    IDC_WHEREDOESTIMEGO   "WHEREDOESTIMEGO"
-   IDS_APP_TITLE       "WhereDoesTimeGo"
+   IDS_APP_TITLE        "WhereDoesTimeGo"
 END
 
 #endif
