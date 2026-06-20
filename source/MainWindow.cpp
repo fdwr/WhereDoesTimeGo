@@ -51,6 +51,7 @@ struct TimeEntry
     DWORD durationSeconds;
 
     void ResetStartAndEndTimeToNow();
+    void SetStartTimeToEndTime();
     void SetEndTimeToNow(); // Wrap up this entry by setting the end time to now and calculating the duration.
 };
 
@@ -651,7 +652,6 @@ void RecordActiveWindowDetails()
     {
         .windowTitle = windowTitle,
         .processName = processName,
-        .durationSeconds = 0,
     };
     newEntry.ResetStartAndEndTimeToNow();
 
@@ -1569,13 +1569,12 @@ void AddLapEntry(HWND hWnd)
         return;
     }
 
-    // Duplicate the last entry, with empty time.
+    // Duplicate the last entry, with empty time continuing from the previous entry.
     g_timeEntries.reserve(g_timeEntries.size() + 1);
     g_timeEntries.push_back(g_timeEntries.back());
-    TimeEntry& lastEntry = g_timeEntries.back();
-    lastEntry.startTime = lastEntry.endTime;
-    SetFileModifiedState(true);
+    g_timeEntries.back().SetStartTimeToEndTime();
 
+    SetFileModifiedState(true);
     RefreshUI();
 }
 
@@ -1621,6 +1620,12 @@ void TimeEntry::ResetStartAndEndTimeToNow()
 {
     GetSystemTime(&startTime);
     endTime = startTime;
+    durationSeconds = 0;
+}
+
+void TimeEntry::SetStartTimeToEndTime()
+{
+    startTime = endTime;
     durationSeconds = 0;
 }
 
