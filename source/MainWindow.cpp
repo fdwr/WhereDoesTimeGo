@@ -227,7 +227,7 @@ BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow)
     icex.dwICC = ICC_BAR_CLASSES | ICC_LISTVIEW_CLASSES;
     InitCommonControlsEx(&icex);
 
-    HWND hWnd = CreateWindowW(g_windowClassName, g_defaultWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 1200, 700, nullptr, nullptr, hInstance, nullptr);
+    HWND hWnd = CreateWindowW(g_windowClassName, g_defaultWindowTitle, WS_OVERLAPPEDWINDOW, CW_USEDEFAULT, 0, 1200, 760, nullptr, nullptr, hInstance, nullptr);
     g_hWndMainWindow = hWnd;
 
     if (!hWnd)
@@ -354,104 +354,81 @@ void ResizeControls(HWND hWnd)
     int toolbarHeight = toolbarRect.bottom - toolbarRect.top;
 
     int spacing = 8;
-    int labelHeight = 20;
-    int timerHeight = 60;
+    int labelListSpacing = 2; // Minor spacing between label and listbox.
+    int labelHeight = 20; // Average height for a label, like the timer entries and tasks labels.
+    int timerHeight = 60; // Height of normal timer (not mega timer used in timer-only mode).
     int topMargin = toolbarHeight + spacing;
     int bottomMargin = spacing;
     int leftMargin = spacing;
     int rightMargin = spacing;
 
     int availableWidth = clientRect.right - leftMargin - rightMargin;
-    int availableHeight = clientRect.bottom - topMargin - bottomMargin - labelHeight - spacing;
-
-    // Check if only timer is visible.
-    bool onlyTimerVisible = g_showTimer && !g_showTimeEntries && !g_showPieChart && !g_showCalendar;
+    int availableHeight = clientRect.bottom - topMargin - bottomMargin;
 
     if (g_showTimer)
     {
-        // Timer-only mode hides everything else and shows timer at full size.
-        if (onlyTimerVisible)
-        {
-            // Use mega font for timer-only mode.
-            // Position timer to fill entire available area.
-            SetWindowFont(g_hwndTimerDisplay, g_hMegaTimerFont, TRUE);
-            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, topMargin, availableWidth, availableHeight + labelHeight + spacing, SWP_NOZORDER | SWP_NOCOPYBITS);
-        }
-        else
+        if (g_showTimeEntries || g_showPieChart || g_showCalendar)
         {
             // Use normal font if in normal mode.
+            // Position timer at the bottom spanning full width (unless it's the only visible control).
             SetWindowFont(g_hwndTimerDisplay, g_hTimerFont, TRUE);
+            int timerTop = topMargin + availableHeight - timerHeight;
+            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, timerTop, availableWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
+
+            // Reserve space for timer at bottom if showing timer and other controls.
+            availableHeight -= (timerHeight + spacing);
+        }
+        else // only timer visible
+        {
+            // Timer-only mode hides everything else and shows timer at full size.
+            // Use mega font for timer-only mode, and position timer to fill entire available area.
+            SetWindowFont(g_hwndTimerDisplay, g_hMegaTimerFont, TRUE);
+            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, topMargin, availableWidth, availableHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
         }
     }
 
     int totalHorizontalElements = (g_showTimeEntries ? 1 : 0) + (g_showPieChart ? 1 : 0) + (g_showCalendar ? 1 : 0);
     int currentX = leftMargin;
-    int listTopMargin = topMargin + labelHeight + 2;
-    int listHeight = availableHeight;
-    int elementWidth = availableWidth / std::max(totalHorizontalElements, 1) - (spacing * (totalHorizontalElements - 1));
-
-    // Reserve space for timer at bottom if showing timer without pie chart.
-    if (g_showTimer && g_showTimeEntries && !g_showPieChart && !g_showCalendar)
-    {
-        listHeight -= (timerHeight + spacing);
-    }
+    int listTopMargin = topMargin + labelHeight + labelListSpacing;
+    int elementWidth = (availableWidth - (spacing * (totalHorizontalElements - 1))) / std::max(totalHorizontalElements, 1);
 
     // Vertically stack time entries (raw and aggregated lists).
     if (g_showTimeEntries)
     {
         int listWidth = elementWidth;
-        int halfListHeight = (listHeight - labelHeight - spacing * 2) / 2;
+        int halfListHeight = ((availableHeight - spacing) / 2) - labelHeight - labelListSpacing;
 
         // Time Entries list is on top.
         SetWindowPos(g_hwndLabelTimeEntries, nullptr, currentX, topMargin, listWidth, labelHeight, SWP_NOZORDER);
         SetWindowPos(g_hwndTimeEntriesList, nullptr, currentX, listTopMargin, listWidth, halfListHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
 
         // Tasks list is below.
+        int bottom = topMargin + availableHeight;
         int tasksLabelTop = listTopMargin + halfListHeight + spacing;
-        int tasksListTop = tasksLabelTop + labelHeight + 2;
+        int tasksListTop = tasksLabelTop + labelHeight + labelListSpacing;
+        halfListHeight = bottom - tasksListTop;
         SetWindowPos(g_hwndLabelTasks, nullptr, currentX, tasksLabelTop, listWidth, labelHeight, SWP_NOZORDER);
         SetWindowPos(g_hwndAggregatedTimeEntriesList, nullptr, currentX, tasksListTop, listWidth, halfListHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
 
         currentX += listWidth + spacing;
     }
 
-    // Show/hide and position pie chart and timer.
+    // Show/hide and position pie chart.
     if (g_showPieChart)
     {
         int pieChartWidth = elementWidth;
-        int pieChartHeight = availableHeight + labelHeight + 2;
-
-        if (g_showTimer)
-        {
-            pieChartHeight -= (timerHeight + spacing);
-        }
+        int pieChartHeight = availableHeight;
 
         SetWindowPos(g_hwndPieChart, nullptr, currentX, topMargin, pieChartWidth, pieChartHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
 
-        if (g_showTimer)
-        {
-            int timerTop = topMargin + pieChartHeight + spacing;
-            SetWindowPos(g_hwndTimerDisplay, nullptr, currentX, timerTop, pieChartWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
-        }
-
         currentX += pieChartWidth + spacing;
-    }
-    else
-    {
-        // Show timer below lists if visible (stretching full width).
-        if (g_showTimer && g_showTimeEntries)
-        {
-            int timerTop = listTopMargin + listHeight + spacing;
-            int timerWidth = availableWidth - (currentX - leftMargin);
-            SetWindowPos(g_hwndTimerDisplay, nullptr, leftMargin, timerTop, availableWidth, timerHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
-        }
     }
 
     // Show/hide and position calendar.
     if (g_showCalendar)
     {
         int calendarWidth = elementWidth;
-        int calendarHeight = availableHeight + labelHeight + 2;
+        int calendarHeight = availableHeight;
 
         SetWindowPos(g_hwndCalendar, nullptr, currentX, topMargin, calendarWidth, calendarHeight, SWP_NOZORDER | SWP_NOCOPYBITS);
     }
@@ -461,8 +438,8 @@ void ResizeControls(HWND hWnd)
     if (allHidden)
     {
         // Center the empty state label. Unfortunately SS_CENTERIMAGE only works with single lines. So, estimate here.
-        int labelWidth = 400;
-        int labelHeight = 100;
+        int labelWidth = 200;
+        int labelHeight = 86;
         int labelX = (clientRect.right - labelWidth) / 2;
         int labelY = (clientRect.bottom - topMargin - labelHeight) / 2 + topMargin;
         SetWindowPos(g_hwndLabelEmptyState, nullptr, labelX, labelY, labelWidth, labelHeight, SWP_NOZORDER);

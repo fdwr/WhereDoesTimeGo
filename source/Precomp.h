@@ -23,6 +23,7 @@
 #include <memory.h>
 #include <tchar.h>
 #include <shlobj.h>
+#include <assert.h>
 
 // C++ standard library header files
 #include <span>
