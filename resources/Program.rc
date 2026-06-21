@@ -74,7 +74,7 @@ BEGIN
     BEGIN
         MENUITEM "&Start Tracking\tEnter/F5", IDM_START_TIME_TRACKING
         MENUITEM "S&top Tracking\tEscape/F8", IDM_STOP_TIME_TRACKING
-        MENUITEM "Add &Lap",            IDM_ADD_LAP_ENTRY
+        MENUITEM "Add &Lap\tF6",        IDM_ADD_LAP_ENTRY
         MENUITEM "", 0, MFT_SEPARATOR, 0
         POPUP "Polling &Frequency"
         BEGIN
@@ -88,15 +88,15 @@ BEGIN
     BEGIN
         MENUITEM "Show Time &Entries",  IDM_SHOW_TIME_ENTRIES
         MENUITEM "Show &Timer",         IDM_SHOW_TIMER
-        MENUITEM "Show &Calendar",      IDM_SHOW_CALENDAR
         MENUITEM "Show &Pie Chart",     IDM_SHOW_PIE_CHART
+        MENUITEM "Show &Calendar",      IDM_SHOW_CALENDAR
         MENUITEM "", 0, MFT_SEPARATOR, 0
         MENUITEM "Show &Away Time",     IDM_SHOW_AWAY_TIME
         MENUITEM "&Show WhereDoesTimeGo.exe", IDM_SHOW_SELF
     END
     POPUP "&Help"
     BEGIN
-        MENUITEM "&About ...",          IDM_ABOUT
+        MENUITEM "&About ...\tF1",      IDM_ABOUT
     END
     MENUITEM "Minimize To Tray",        IDM_MINIMIZE_TO_TRAY, MFT_RIGHTJUSTIFY
 END
@@ -118,6 +118,7 @@ BEGIN
     VK_ESCAPE,      IDM_STOP_TIME_TRACKING,     VIRTKEY
     VK_RETURN,      IDM_START_TIME_TRACKING,    VIRTKEY
     VK_F5,          IDM_START_TIME_TRACKING,    VIRTKEY
+    VK_F6,          IDM_ADD_LAP_ENTRY,          VIRTKEY
     VK_F8,          IDM_STOP_TIME_TRACKING,     VIRTKEY
     VK_F2,          IDM_EDIT,                   VIRTKEY
     VK_F1,          IDM_ABOUT,                  VIRTKEY

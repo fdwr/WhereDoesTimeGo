@@ -338,7 +338,7 @@ void CreateControls(HWND hWnd)
     g_hwndPieChart = CreateWindowEx(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, 630, 50, 500, 500, hWnd, (HMENU)IDC_PIECHART, g_instanceHandle, nullptr);
     g_hwndCalendar = CreateWindowEx(0, L"STATIC", nullptr, WS_CHILD | WS_VISIBLE | SS_OWNERDRAW, 630, 50, 500, 500, hWnd, (HMENU)IDC_CALENDAR, g_instanceHandle, nullptr);
     g_hwndTimerDisplay = CreateWindowEx(0, L"STATIC", L"00h 00m 00s", WS_CHILD | WS_VISIBLE | SS_CENTER | SS_CENTERIMAGE , 630, 550, 500, 60, hWnd, (HMENU)IDC_TIMER_DISPLAY, g_instanceHandle, nullptr);
-    g_hwndLabelEmptyState = CreateWindowEx(0, L"STATIC", L"Click View / Show Entries, Pie Chart, or Timer to see them\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.", WS_CHILD | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)IDC_LABEL_EMPTY_STATE, g_instanceHandle, nullptr);
+    g_hwndLabelEmptyState = CreateWindowEx(0, L"STATIC", L"Click View / Show Entries, Timer, Pie Chart, or Calendar to see them.\r\n\r\n⏰ A profiler for your life,\r\n💧 A leak detector for your day,\r\n🔍 Finding lost hours since 2026.", WS_CHILD | SS_CENTER, 0, 0, 0, 0, hWnd, (HMENU)IDC_LABEL_EMPTY_STATE, g_instanceHandle, nullptr);
 
     SetWindowFont(g_hwndLabelTimeEntries, g_hLabelFont, FALSE);
     SetWindowFont(g_hwndLabelTasks, g_hLabelFont, FALSE);
@@ -446,7 +446,7 @@ void ResizeControls(HWND hWnd)
     {
         // Center the empty state label. Unfortunately SS_CENTERIMAGE only works with single lines. So, estimate here.
         int labelWidth = 200;
-        int labelHeight = 86;
+        int labelHeight = 92;
         int labelX = (clientRect.right - labelWidth) / 2;
         int labelY = (clientRect.bottom - topMargin - labelHeight) / 2 + topMargin;
         SetWindowPos(g_hwndLabelEmptyState, nullptr, labelX, labelY, labelWidth, labelHeight, SWP_NOZORDER);
