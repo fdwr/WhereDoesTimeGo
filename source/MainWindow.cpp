@@ -2435,8 +2435,6 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             // On click, ensure the item is visible.
             if (message == WM_LBUTTONDOWN && newHoveredIndex != -1)
             {
-                //SendMessage(g_hwndTimeEntriesList, LB_SETCURSEL, newHoveredTimeEntryIndex, 0);
-                //--UpdateLastSelectedTimeToSelectedEntry(newHoveredTimeEntryIndex);
                 EnsureListboxIndexVisible(listboxHwnd, newHoveredIndex);
             }
         }
