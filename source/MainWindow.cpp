@@ -5,7 +5,7 @@
 
 #define MAX_LOADSTRING 100
 #define TIMER_TRACK_ID 1
-#define DEFAULT_POLLING_INTERVAL 60 * 1000 // every minute.
+#define DEFAULT_POLLING_INTERVAL 0 // Never - use SetWinEventHook instead.
 #define WM_TRAYICON (WM_USER + 100)
 #define TRAY_ICON_ID 1
 
@@ -478,9 +478,13 @@ void UpdateTrackingTimer()
             SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, 1000, nullptr);
         }
         // Otherwise if minimized/hidden, update less frequently to save resources, since the user can't see the updates anyway.
-        else
+        else if (g_pollingInterval > 0)
         {
             SetTimer(g_hWndMainWindow, TIMER_TRACK_ID, g_pollingInterval, nullptr);
+        }
+        else
+        {
+            KillTimer(g_hWndMainWindow, TIMER_TRACK_ID);
         }
     }
     else
@@ -1923,7 +1927,7 @@ void LoadSettings()
     g_showAwayTime = ParseBool(settings[L"View.ShowAwayTime"], true);
     g_showSelf = ParseBool(settings[L"View.ShowSelf"], true);
     g_saveOnExit = ParseBool(settings[L"File.SaveOnExit"], false);
-    g_pollingInterval = ParseInt(settings[L"Track.PollingInterval"], 1000);
+    g_pollingInterval = ParseInt(settings[L"Track.PollingInterval"], DEFAULT_POLLING_INTERVAL);
 }
 
 void SortTimeEntriesByTime()
@@ -2258,6 +2262,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         CheckMenuItem(hMenu, IDM_SHOW_AWAY_TIME, MF_BYCOMMAND | (g_showAwayTime ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_SHOW_SELF, MF_BYCOMMAND | (g_showSelf ? MF_CHECKED : MF_UNCHECKED));
         // Update checkmarks for Track > Polling Frequency submenu.
+        CheckMenuItem(hMenu, IDM_POLLING_NEVER, MF_BYCOMMAND | (g_pollingInterval == 0 ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_POLLING_1SEC, MF_BYCOMMAND | (g_pollingInterval == 1000 ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_POLLING_10SEC, MF_BYCOMMAND | (g_pollingInterval == 10000 ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_POLLING_60SEC, MF_BYCOMMAND | (g_pollingInterval == 60000 ? MF_CHECKED : MF_UNCHECKED));
@@ -2358,6 +2363,10 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         case IDM_SHOW_SELF:
             g_showSelf = !g_showSelf;
             RefreshUI();
+            break;
+        case IDM_POLLING_NEVER:
+            g_pollingInterval = 0;
+            UpdateTrackingTimer();
             break;
         case IDM_POLLING_1SEC:
             g_pollingInterval = 1000;

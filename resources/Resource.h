@@ -37,11 +37,12 @@
 #define IDM_SAVE_ON_EXIT            127
 #define IDM_SHOW_AWAY_TIME          128
 #define IDM_SHOW_SELF               129
-#define IDM_POLLING_1SEC            130
-#define IDM_POLLING_10SEC           131
-#define IDM_POLLING_60SEC           132
-#define IDM_POLLING_10MIN           133
-#define IDM_MINIMIZE_TO_TRAY        134
+#define IDM_POLLING_NEVER           130
+#define IDM_POLLING_1SEC            131
+#define IDM_POLLING_10SEC           132
+#define IDM_POLLING_60SEC           133
+#define IDM_POLLING_10MIN           134
+#define IDM_MINIMIZE_TO_TRAY        135
 
 #define IDC_TOOLBAR                 1001
 #define IDC_RAW_TIME_ENTRY_LIST     1002

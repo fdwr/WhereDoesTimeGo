@@ -78,6 +78,7 @@ BEGIN
         MENUITEM "", 0, MFT_SEPARATOR, 0
         POPUP "Polling &Frequency"
         BEGIN
+            MENUITEM "Never (just use SetWinEventHook)", IDM_POLLING_NEVER
             MENUITEM "1 Second",        IDM_POLLING_1SEC
             MENUITEM "10 Seconds",      IDM_POLLING_10SEC
             MENUITEM "60 Seconds",      IDM_POLLING_60SEC
