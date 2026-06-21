@@ -74,8 +74,6 @@ I looked over these - some were closer than others to my needs:
 
 Note I'm probably not going invest much more into this program (this took 3 days to write), but a few simple things remaining...
 
-- Clicking on a pie chart slice should highlight the task.
-- Clicking on a calendar box should highlight the time entry.
-- Manual mode when you select a different task to add time entries (like ATracker).
+- Manual mode when you select a different task to add time entries (like cool ATracker).
 - Allow entering custom tasks.
 - Compare CSV format with other CSV-capable apps, and either adapt my CSV fields for compatibility, or support loading them.
