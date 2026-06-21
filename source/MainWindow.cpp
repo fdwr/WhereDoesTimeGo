@@ -626,6 +626,22 @@ void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry)
     std::wstring windowTitle = title;
     std::wstring processName = GetProcessName(hForeground);
 
+    // For derpy UWP apps, retry to get the actual process using the focus window.
+    // We still use the active HWND by default because otherwise some cases (like with Explorer's taskbar)
+    // don't yield any useful result as the focus HWND is still null.
+    if (processName == L"ApplicationFrameHost.exe")
+    {
+        GUITHREADINFO guiThreadInfo = { sizeof(GUITHREADINFO) };
+        GetGUIThreadInfo(0, &guiThreadInfo); // 0 means to use the foreground thread.
+
+        // Use hwndFocus rather than hwndActive (as active would just be the framehost again).
+        // https://stackoverflow.com/a/51946137/937938
+        if (guiThreadInfo.hwndFocus != nullptr)
+        {
+            processName = GetProcessName(guiThreadInfo.hwndFocus);
+        }
+    }
+
     SetFileModifiedState(true);
 
     // Try to merge this entry with the previous one if it's the same window & process
@@ -700,8 +716,8 @@ std::wstring GetProcessName(HWND hWnd)
     HANDLE hProcess = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, FALSE, processId);
     if (hProcess)
     {
-        WCHAR path[MAX_PATH * 2] = {};
-        DWORD pathLength = MAX_PATH * 2;
+        DWORD pathLength = MAX_PATH * 4;
+        WCHAR path[MAX_PATH * 4] = {};
 
         // Use QueryFullProcessImageName over GetModuleFileNameEx since we only care about the exe,
         // not any DLLs loaded in that exe, as it's more robust to limited information cases and WoW64.
@@ -719,6 +735,7 @@ std::wstring GetProcessName(HWND hWnd)
     }
 
     // Fallback case - use window class name for processes we can't open.
+    // I'm not sure if this actually works, because I haven't found a case, but it could occur if run with limited permissions.
     WCHAR className[256] = {};
     if (GetClassName(hWnd, className, 256) > 0)
     {
