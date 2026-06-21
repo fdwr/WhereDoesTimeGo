@@ -125,7 +125,7 @@ void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry);
 void RecordInactiveState();
 std::wstring GetProcessName(HWND hWnd);
 void UpdateWindowTitle();
-void SetTimeEntriesFilePath(const std::wstring& filePath);
+void SetTimeEntriesFilePath(std::wstring_view filePath);
 void SetFileModifiedState(bool isModified);
 
 void DrawPieChart(HDC hdc, RECT& rect);
@@ -135,10 +135,11 @@ bool WriteTextFile(const WCHAR* filename, std::wstring_view content);
 bool ReadTextFile(const WCHAR* filename, std::wstring& outContent);
 bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& outEntries);
 void SortTimeEntriesByTime();
-std::wstring GetSettingsPath(bool createPath = false, bool addFileName = true);
+std::wstring GetUserDocumentsDirectory();
+std::wstring GetSettingsFilePath(bool createPath = false, bool addFileName = true);
 void NewFile(HWND hWnd);
-void LoadFromCSV(HWND hWnd);
-void MergeFromCSV(HWND hWnd);
+void LoadFromCSV(HWND hWnd, bool mergeWithExisting = false);
+void LoadFromCSV(HWND hWnd, const wchar_t* filePath, bool mergeWithExisting = false);
 void SaveToCSV(HWND hWnd);
 void SaveAsToCSV(HWND hWnd);
 void SaveToCSV(HWND hwnd, const wchar_t* filePath);
@@ -1309,7 +1310,7 @@ void UpdateWindowTitle()
     SetWindowText(g_hWndMainWindow, title.c_str());
 }
 
-void SetTimeEntriesFilePath(const std::wstring& filePath)
+void SetTimeEntriesFilePath(std::wstring_view filePath)
 {
     g_timeEntriesFilePath = filePath;
     g_timeEntriesAreModified = false; // Updating the file path implies we've just saved or loaded. So reset the modified state.
@@ -1330,71 +1331,159 @@ void NewFile(HWND hWnd)
     ClearAllEntries(hWnd, /*isNewFile*/ true);
 }
 
-// Use the existing filename, if already saved before.
-// Otherwise generate a new Untitled filename using the current time.
-// Place logs in the LocalAppData folder.
-void CopyOrGenerateTimeEntriesFilePath(std::span<wchar_t> targetFilename)
+// Use the existing file path, if already saved before.
+// Otherwise generate a new "Untitled-###..." filename using the current time.
+// Append the filename to the existing path if one is passed in.
+//
+void GetSuitableTimeEntriesSaveFilePath(bool defaultToDocumentsFolder, /*inout*/ std::wstring& filePath)
 {
-    if (g_timeEntriesFilePath.empty())
+    if (!g_timeEntriesFilePath.empty())
     {
-        SYSTEMTIME now;
-        GetSystemTime(&now);
-        std::wstring filename = L"\\Untitled-" + std::format(L"{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond) + L".wdtg.csv";
-        wcsncpy_s(targetFilename.data(), targetFilename.size(), filename.c_str(), _TRUNCATE);
+        // We already have a file path from before, such as from loading a file or a previous save. So just use that.
+        filePath = g_timeEntriesFilePath;
     }
     else
     {
-        const wchar_t* sourceFilename = !g_timeEntriesFilePath.empty() ? g_timeEntriesFilePath.c_str() : L"Untitled";
-        wcsncpy_s(targetFilename.data(), targetFilename.size(), sourceFilename, _TRUNCATE);
+        // Generate a name.
+
+        // Use the user's documents folder if requested and there's no explicit path already.
+        // Ensure any optionally passed in path has a trailing backslash.
+        if (filePath.empty())
+        {
+            if (defaultToDocumentsFolder)
+            {
+                filePath = GetUserDocumentsDirectory();
+            }
+        }
+        else if (filePath.back() != L'\\' && filePath.back() != L'/')
+        {
+            filePath.append(L"\\");
+        }
+
+        SYSTEMTIME now;
+        GetSystemTime(&now);
+        filePath.append(std::format(L"Untitled-{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}.wdtg.csv", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond));
     }
 }
 
-void SaveAsToCSV(HWND hWnd)
+void LoadFromCSV(HWND hWnd, bool mergeWithExisting)
 {
-    OPENFILENAME openFileName = {};
-    WCHAR filename[MAX_PATH * 4] = {};
-    CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
+    std::wstring filePath(g_timeEntriesFilePath);
+    filePath.resize(MAX_PATH * 4); // Allow more space for long filenames.
 
-    openFileName.lStructSize = sizeof(OPENFILENAME);
-    openFileName.hwndOwner = hWnd;
-    openFileName.lpstrFile = filename;
-    openFileName.nMaxFile = DWORD(std::size(filename));
-    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    openFileName.nFilterIndex = 1;
-    openFileName.lpstrFileTitle = nullptr;
-    openFileName.nMaxFileTitle = 0;
-    openFileName.lpstrInitialDir = nullptr;
-    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT;
-    openFileName.lpstrDefExt = L"wdtg.csv";
-
-    if (GetSaveFileName(&openFileName))
+    OPENFILENAME openFileName =
     {
-        SetTimeEntriesFilePath(openFileName.lpstrFile);
-        SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
-    }
-}
+        .lStructSize = sizeof(OPENFILENAME),
+        .hwndOwner = hWnd,
+        .lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0",
+        .nFilterIndex = 1,
+        .lpstrFile = filePath.data(),
+        .nMaxFile = DWORD(filePath.size()),
+        .lpstrFileTitle = nullptr,
+        .nMaxFileTitle = 0,
+        .lpstrInitialDir = nullptr,
+        .Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST,
+        .lpstrDefExt = L"wdtg.csv",
+    };
 
-void SaveToCSV(HWND hWnd)
-{
-    if (g_timeEntriesFilePath.empty())
+    if (!GetOpenFileName(&openFileName))
     {
-        SaveAsToCSV(hWnd);
         return;
     }
 
-    SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
+    LoadFromCSV(hWnd, filePath.c_str(), mergeWithExisting);
 }
 
-void SaveToCSV(HWND hWnd, wchar_t const* filePath)
+void LoadFromCSV(HWND hWnd, const wchar_t* filePath, bool mergeWithExisting)
 {
-    // Use the passed name if provided, or generate a new one if not already set.
-    WCHAR filenameBuffer[MAX_PATH * 4] = {};
-    if (filePath == nullptr || filePath[0] == L'\0')
+    std::wstring fileContent;
+    if (!ReadTextFile(filePath, /*out*/ fileContent))
     {
-        CopyOrGenerateTimeEntriesFilePath(/*out*/ filenameBuffer);
-        filePath = filenameBuffer;
+        std::wstring errorMessage = L"Failed to read file:\r\n";
+        errorMessage.append(filePath);
+        MessageBox(hWnd, errorMessage.c_str(), g_defaultWindowTitle, MB_OK | MB_ICONERROR);
+        return;
     }
 
+    if (mergeWithExisting)
+    {
+        std::vector<TimeEntry> newEntries;
+        if (ParseCSVEntries(fileContent, newEntries))
+        {
+            // Append new entries to existing ones.
+            // Could just use std::vector::append_move ... if only there was one 🙃.
+            g_timeEntries.reserve(g_timeEntries.size() + newEntries.size());
+            for (const auto& entry : newEntries)
+            {
+                g_timeEntries.push_back(std::move(entry));
+            }
+
+            SetFileModifiedState(true);
+            SortTimeEntriesByTime();
+        }
+    }
+    else // Loading a new file.
+    {
+        StopTracking(hWnd); // It's weird to automatically start tracking a file that's just being loaded.
+        SetTimeEntriesFilePath(filePath);
+
+        g_timeEntries.clear();
+        ParseCSVEntries(fileContent, /*out*/ g_timeEntries);
+        SetFileModifiedState(false);
+    }
+
+    // Update the last selected time so that if you open the calendar, it will show the last entry's date.
+    if (!g_timeEntries.empty())
+    {
+        g_lastSelectedTime = g_timeEntries.back().endTime;
+    }
+
+    RefreshUI();
+    SelectLastItemInRawList();
+}
+
+// Save the time entries to a CSV file, prompting for a filename if needed.
+void SaveToCSV(HWND hWnd, bool alwaysAskForName, bool askForNameIfNeeded)
+{
+    std::wstring filePath;
+    if (alwaysAskForName || (askForNameIfNeeded && g_timeEntriesFilePath.empty()))
+    {
+        GetSuitableTimeEntriesSaveFilePath(/*defaultToDocumentsFolder*/ false, /*out*/ filePath);
+        filePath.resize(MAX_PATH * 4); // Allow more space for long filenames.
+
+        OPENFILENAME openFileName =
+        {
+            .lStructSize = sizeof(OPENFILENAME),
+            .hwndOwner = hWnd,
+            .lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0",
+            .nFilterIndex = 1,
+            .lpstrFile = filePath.data(),
+            .nMaxFile = DWORD(filePath.size()),
+            .lpstrFileTitle = nullptr,
+            .nMaxFileTitle = 0,
+            .lpstrInitialDir = nullptr,
+            .Flags = OFN_PATHMUSTEXIST | OFN_OVERWRITEPROMPT,
+            .lpstrDefExt = L"wdtg.csv",
+        };
+
+        if (!GetSaveFileName(&openFileName))
+        {
+            return;
+        }
+    }
+    else
+    {
+        // Otherwise the program (or even whole operating system) might be shutting down.
+        // So just use a generated file path in the settings folder.
+        GetSuitableTimeEntriesSaveFilePath(/*defaultToDocumentsFolder*/ true, /*inout*/ filePath);
+    }
+
+    SaveToCSV(hWnd, filePath.c_str());
+}
+
+// Save the time entries to a CSV file at the specified path.
+void SaveToCSV(HWND hWnd, wchar_t const* filePath)
+{
     std::wstringstream csvData;
     csvData << L"Window Title,Process Name,Start Time,End Time,Duration (seconds)\n";
 
@@ -1414,9 +1503,12 @@ void SaveToCSV(HWND hWnd, wchar_t const* filePath)
         // Don't save durationSeconds, since it can be recomputed and removes potential inconsistencies if the file is edited manually.
     }
 
+    SetTimeEntriesFilePath(filePath);
     if (!WriteTextFile(filePath, csvData.str()))
     {
-        MessageBox(hWnd, L"Failed to write file", L"Error", MB_OK | MB_ICONERROR);
+        std::wstring errorMessage = L"Failed to write file:\r\n";
+        errorMessage.append(filePath);
+        MessageBox(hWnd, errorMessage.c_str(), g_defaultWindowTitle, MB_OK | MB_ICONERROR);
     }
     else
     {
@@ -1483,7 +1575,23 @@ bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& ou
     return !outEntries.empty();
 }
 
-std::wstring GetSettingsPath(bool createPath, bool addFileName)
+// Get the user's Documents directory path, ensuring it ends with a backslash.
+std::wstring GetUserDocumentsDirectory()
+{
+    WCHAR path[MAX_PATH];
+    if (SUCCEEDED(SHGetFolderPathW(NULL, CSIDL_PERSONAL, NULL, 0, path)))
+    {
+        auto filePath = std::wstring(path);
+        if (!filePath.empty() && filePath.back() != L'\\')
+        {
+            filePath += L'\\';
+        }
+        return filePath;
+    }
+    return L"";
+}
+
+std::wstring GetSettingsFilePath(bool createPath, bool addFileName)
 {
     WCHAR path[MAX_PATH];
     SHGetFolderPathW(NULL, CSIDL_LOCAL_APPDATA, NULL, 0, path);
@@ -1507,7 +1615,7 @@ std::wstring GetSettingsPath(bool createPath, bool addFileName)
 
 void SaveSettings()
 {
-    std::wstring path = GetSettingsPath(true);
+    std::wstring path = GetSettingsFilePath(/*createPathIfNeeded*/ true, /*addFileName*/ true);
     std::wofstream file(path);
     
     file << L"; WhereDoesTimeGo v1.0 2026-06-18\n\n";
@@ -1542,7 +1650,7 @@ int ParseInt(const std::wstring& value, int defaultValue = 0)
 
 void LoadSettings()
 {
-    std::wstring path = GetSettingsPath();
+    std::wstring path = GetSettingsFilePath(/*createPathIfNeeded*/ false, /*addFileName*/ true);
     std::wifstream file(path);
     
     if (!file.is_open())
@@ -1611,90 +1719,6 @@ void SortTimeEntriesByTime()
             return uliA.QuadPart < uliB.QuadPart;
         }
     );
-}
-
-void LoadFromCSV(HWND hWnd)
-{
-    OPENFILENAME openFileName = {};
-    WCHAR filename[MAX_PATH * 4] = {};
-    CopyOrGenerateTimeEntriesFilePath(/*out*/ filename);
-
-    openFileName.lStructSize = sizeof(OPENFILENAME);
-    openFileName.hwndOwner = hWnd;
-    openFileName.lpstrFile = filename;
-    openFileName.nMaxFile = DWORD(std::size(filename));
-    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    openFileName.nFilterIndex = 1;
-    openFileName.lpstrFileTitle = nullptr;
-    openFileName.nMaxFileTitle = 0;
-    openFileName.lpstrInitialDir = nullptr;
-    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-    openFileName.lpstrDefExt = L"wdtg.csv";
-
-    if (GetOpenFileName(&openFileName))
-    {
-        StopTracking(hWnd); // It's weird to automatically start tracking a file that's just being loaded.
-        SetTimeEntriesFilePath(openFileName.lpstrFile);
-
-        std::wstring fileContent;
-        if (!ReadTextFile(filename, fileContent))
-        {
-            MessageBox(hWnd, L"Failed to read file", L"Error", MB_OK | MB_ICONERROR);
-            return;
-        }
-
-        g_timeEntries.clear();
-        ParseCSVEntries(fileContent, /*out*/ g_timeEntries);
-        SetFileModifiedState(false);
-        if (!g_timeEntries.empty())
-        {
-            g_lastSelectedTime = g_timeEntries.back().endTime;
-        }
-
-        RefreshUI();
-        SelectLastItemInRawList();
-    }
-}
-
-void MergeFromCSV(HWND hWnd)
-{
-    OPENFILENAME openFileName = {};
-    WCHAR filename[MAX_PATH * 4] = {};
-
-    openFileName.lStructSize = sizeof(OPENFILENAME);
-    openFileName.hwndOwner = hWnd;
-    openFileName.lpstrFile = filename;
-    openFileName.nMaxFile = DWORD(std::size(filename));
-    openFileName.lpstrFilter = L"CSV Files (*.wdtg.csv)\0*.wdtg.csv\0All Files (*.*)\0*.*\0";
-    openFileName.nFilterIndex = 1;
-    openFileName.lpstrFileTitle = nullptr;
-    openFileName.nMaxFileTitle = 0;
-    openFileName.lpstrInitialDir = nullptr;
-    openFileName.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-    openFileName.lpstrDefExt = L"wdtg.csv";
-
-    if (GetOpenFileName(&openFileName))
-    {
-        std::wstring fileContent;
-        if (!ReadTextFile(filename, fileContent))
-        {
-            MessageBox(hWnd, L"Failed to read file", L"Error", MB_OK | MB_ICONERROR);
-            return;
-        }
-
-        std::vector<TimeEntry> newEntries;
-        if (ParseCSVEntries(fileContent, newEntries))
-        {
-            // Append new entries to existing ones
-            g_timeEntries.insert(g_timeEntries.end(), newEntries.begin(), newEntries.end());
-            SetFileModifiedState(true);
-
-            // Sort all entries by start time
-            SortTimeEntriesByTime();
-
-            RefreshUI();
-        }
-    }
 }
 
 void ClearAllEntries(HWND hWnd, bool isNewFile)
@@ -2021,16 +2045,16 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             NewFile(hWnd);
             break;
         case IDM_OPEN:
-            LoadFromCSV(hWnd);
+            LoadFromCSV(hWnd, /*mergeWithExisting*/ false);
             break;
         case IDM_MERGE:
-            MergeFromCSV(hWnd);
+            LoadFromCSV(hWnd, /*mergeWithExisting*/ true);
             break;
         case IDM_SAVE:
-            SaveToCSV(hWnd);
+            SaveToCSV(hWnd, /*alwaysAskForName*/ false, /*askForNameIfNeeded*/ true);
             break;
         case IDM_SAVEAS:
-            SaveAsToCSV(hWnd);
+            SaveToCSV(hWnd, /*alwaysAskForName*/ true, /*askForNameIfNeeded*/ true);
             break;
         case IDM_INSERT:
             InsertEntry(hWnd);
@@ -2104,7 +2128,9 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             {
                 // Open the folder in Windows Explorer.
                 SaveSettings();
-                std::wstring settingsPath = GetSettingsPath(false, false);
+
+                // The settings path should have already been created by SaveSettings().
+                std::wstring settingsPath = GetSettingsFilePath(/*createPathIfNeeded*/ false, /*addFileName*/ false);
                 ShellExecute(nullptr, L"explore", settingsPath.c_str(), nullptr, nullptr, SW_SHOWNORMAL);
             }
             break;
@@ -2234,10 +2260,10 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
     case WM_DESTROY:
         StopTracking(hWnd, /*noUiUpdates*/ true);
 
-        // Save on exit if option is enabled.
+        // Save on exit if option is enabled and there are any unsaved entries.
         if (g_saveOnExit && !g_timeEntries.empty() && g_timeEntriesAreModified)
         {
-            SaveToCSV(hWnd, g_timeEntriesFilePath.c_str());
+            SaveToCSV(hWnd, /*alwaysAskForName*/ false, /*askForNameIfNeeded*/ false);
         }
 
         DeleteResourceAndNullify(g_hWinEventHook, &UnhookWinEvent);
