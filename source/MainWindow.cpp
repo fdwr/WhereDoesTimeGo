@@ -89,6 +89,8 @@ bool g_timeEntriesAreModified = false;
 SYSTEMTIME g_lastRecordedTime = {}; // Note UTC, not local.
 SYSTEMTIME g_lastSelectedTime = {}; // Note UTC, not local.
 TimeEntry g_editingEntry = {};
+int g_hoveredTimeEntryIndex = -1; // Whatever the mouse was last over (e.g. in the calendar).
+int g_hoveredAggregateEntryIndex = -1; // Whatever the mouse was last over (e.g. in the pie chart).
 
 ULONG_PTR g_gdiplusToken = 0;
 HFONT g_hLabelFont = nullptr;
@@ -130,6 +132,10 @@ void SetFileModifiedState(bool isModified);
 
 void DrawPieChart(HDC hdc, RECT& rect);
 void DrawCalendar(HDC hdc, RECT& rect);
+int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect);
+int MapCalendarCoordinateToTimeEntryIndex(POINT pt, RECT& rect);
+bool UpdateListboxHoverIndex(HWND hwndListbox, int& currentHoverIndex, int newHoverIndex);
+void DrawListboxItem(std::wstring_view text, HDC hdc, const RECT& rcItem, UINT itemState);
 
 bool WriteTextFile(const WCHAR* filename, std::wstring_view content);
 bool ReadTextFile(const WCHAR* filename, std::wstring& outContent);
@@ -1245,6 +1251,213 @@ void DrawCalendar(HDC hdc, RECT& rect)
     DeleteDC(memoryDC);
 }
 
+int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect)
+{
+    int width = rect.right - rect.left;
+    int height = rect.bottom - rect.top;
+
+    if (g_aggregatedEntries.empty())
+        return -1;
+
+    // Calculate pie chart geometry (must match DrawPieChart).
+    int diameter = std::min(width, height) - 100;
+    int centerX = width / 2;
+    int centerY = height / 2;
+    int radius = diameter / 2;
+
+    // Check if point is within the pie circle.
+    int dx = pt.x - centerX;
+    int dy = pt.y - centerY;
+    float distanceSquared = (float)(dx * dx + dy * dy);
+    if (distanceSquared > radius * radius)
+        return -1; // Outside the pie.
+
+    // Calculate angle from center.
+    // GDI+ FillPie uses: 0 degrees = 3 o'clock (right), positive = clockwise.
+    // atan2(dy, dx) with screen coordinates (y down) gives:
+    //   - 0 degrees at 3 o'clock (right)
+    //   - positive angles going clockwise (since y increases downward)
+    // This matches GDI+ directly!
+    float angleRadians = atan2f((float)dy, (float)dx);
+    float angleDegrees = angleRadians * 180.0f / 3.14159265358979323846f;
+
+    // Normalize to [0, 360) range.
+    if (angleDegrees < 0)
+        angleDegrees += 360.0f;
+
+    // Match against pie slices.
+    float startAngle = 0.0f;
+    for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
+    {
+        float sweepAngle = g_aggregatedEntries[i].percentage * 3.6f;
+        float endAngle = startAngle + sweepAngle;
+
+        if (angleDegrees >= startAngle && angleDegrees < endAngle)
+            return (int)i;
+
+        startAngle = endAngle;
+    }
+
+    return -1;
+}
+
+int MapCalendarCoordinateToTimeEntryIndex(POINT pt, RECT& rect)
+{
+    const int width  = rect.right - rect.left;
+    const int height = rect.bottom - rect.top;
+
+    // Calculate interior region (must match DrawCalendar).
+    constexpr int leftLabelWidth = 60;
+    constexpr int topLabelHeight = 30;
+    constexpr int margin = 5;
+
+    int interiorLeft   = leftLabelWidth + margin;
+    int interiorTop    = topLabelHeight + margin;
+    int interiorRight  = width - margin;
+    int interiorBottom = height - margin;
+    int interiorWidth  = interiorRight - interiorLeft;
+    int interiorHeight = interiorBottom - interiorTop;
+
+    // Check if point is within interior region.
+    if (pt.x < interiorLeft || pt.x >= interiorRight || pt.y < interiorTop || pt.y >= interiorBottom)
+        return -1;
+
+    // Convert to selected day (using g_lastSelectedTime).
+    SYSTEMTIME localSelectedTime;
+    SystemTimeToTzSpecificLocalTime(nullptr, &g_lastSelectedTime, &localSelectedTime);
+
+    // Check each time entry on the selected day.
+    for (size_t i = 0; i < g_timeEntries.size(); ++i)
+    {
+        const auto& entry = g_timeEntries[i];
+
+        // Convert UTC times to local time.
+        SYSTEMTIME localStart, localEnd;
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.startTime, &localStart);
+        SystemTimeToTzSpecificLocalTime(nullptr, &entry.endTime, &localEnd);
+
+        // Check if entry starts on the selected day.
+        if (localStart.wYear != localSelectedTime.wYear || localStart.wMonth != localSelectedTime.wMonth || localStart.wDay != localSelectedTime.wDay)
+            continue;
+
+        // Calculate start and end positions within the day (in seconds from midnight).
+        int startSeconds = localStart.wHour * 3600 + localStart.wMinute * 60 + localStart.wSecond;
+        int endSeconds = localEnd.wHour * 3600 + localEnd.wMinute * 60 + localEnd.wSecond;
+
+        // If end is on a different day, clamp to end of today.
+        if (localEnd.wYear != localSelectedTime.wYear || localEnd.wMonth != localSelectedTime.wMonth || localEnd.wDay != localSelectedTime.wDay)
+        {
+            endSeconds = 86400;
+        }
+
+        if (endSeconds > 86400)
+            endSeconds = 86400;
+        if (startSeconds < 0)
+            startSeconds = 0;
+
+        if (startSeconds >= endSeconds)
+            continue;
+
+        // Check each hour segment this entry spans.
+        int startHour = startSeconds / 3600;
+        int endHour   = (endSeconds - 1) / 3600;
+
+        for (int hour = startHour; hour <= endHour; ++hour)
+        {
+            if (hour >= 24)
+                break;
+
+            // Clamp the entry to the current hour.
+            int hourStartSeconds = hour * 3600;
+            int hourEndSeconds   = (hour + 1) * 3600;
+            int clampedStart     = std::max(startSeconds, hourStartSeconds);
+            int clampedEnd       = std::min(endSeconds, hourEndSeconds);
+
+            if (clampedStart >= clampedEnd)
+                continue;
+
+            // Calculate pixel bounds for this hour's segment.
+            float rowTop    = interiorTop + (hour * interiorHeight / 24.0f);
+            float rowBottom = interiorTop + ((hour + 1) * interiorHeight / 24.0f);
+
+            int secondInHourStart   = clampedStart - hourStartSeconds;
+            int secondInHourEnd     = clampedEnd - hourStartSeconds;
+            float minuteInHourStart = secondInHourStart / 60.0f;
+            float minuteInHourEnd   = secondInHourEnd / 60.0f;
+            float boxLeft  = interiorLeft + (minuteInHourStart / 60.0f) * interiorWidth;
+            float boxRight = interiorLeft + (minuteInHourEnd / 60.0f) * interiorWidth;
+
+            // Check if point is within this box.
+            if (pt.x >= boxLeft && pt.x < boxRight && pt.y >= rowTop && pt.y < rowBottom)
+                return (int)i;
+        }
+    }
+
+    return -1;
+}
+
+// Compute the total line count by dividing the listbox height by the height of a single item.
+int GetVisibleLineCount(HWND hListBox)
+{
+    RECT rect;
+    GetClientRect(hListBox, &rect);
+    int clientHeight = rect.bottom - rect.top;
+    int itemHeight = (int)SendMessage(hListBox, LB_GETITEMHEIGHT, 0, 0);
+    
+    // Calculate visible line count
+    if (itemHeight > 0 && clientHeight > 0)
+    {
+        return clientHeight / itemHeight;
+    }
+    
+    return 0;
+}
+
+void EnsureListboxIndexVisible(HWND hwndListbox, int itemIndex)
+{
+    int currentTopLineIndex = (int)SendMessage(hwndListbox, LB_GETTOPINDEX, 0, 0);
+    int visibleLineCount = GetVisibleLineCount(hwndListbox);
+    int newTopLineIndex = 0;
+    if (itemIndex < currentTopLineIndex)
+    {
+        newTopLineIndex = itemIndex;
+    }
+    else if (itemIndex >= currentTopLineIndex + visibleLineCount)
+    {
+        newTopLineIndex = itemIndex - visibleLineCount + 1;
+    }
+    else
+    {
+        return;
+    }
+
+    SendMessage(hwndListbox, LB_SETTOPINDEX, newTopLineIndex, 0);
+}
+
+bool UpdateListboxHoverIndex(HWND hwndListbox, /*inout*/ int& currentHoverIndex, int newHoverIndex)
+{
+    if (currentHoverIndex == newHoverIndex)
+    {
+        return false; // No change needed.
+    }
+
+    auto invalidateItemRect = [=](int index)
+    {
+        RECT itemRect;
+        if (index != -1 && SendMessage(hwndListbox, LB_GETITEMRECT, index, (LPARAM)&itemRect) != LB_ERR)
+        {
+            InvalidateRect(hwndListbox, &itemRect, FALSE);
+        }
+    };
+
+    // Invalidate both the previous and new hovered item's rectangle.
+    invalidateItemRect(currentHoverIndex);
+    invalidateItemRect(newHoverIndex);
+    currentHoverIndex = newHoverIndex;
+
+    return true; // Hover index was updated.
+}
+
 bool WriteTextFile(const WCHAR* filename, std::wstring_view content)
 {
     HANDLE hFile = CreateFile(filename, GENERIC_WRITE, 0, nullptr, CREATE_ALWAYS, FILE_ATTRIBUTE_NORMAL, nullptr);
@@ -1942,6 +2155,30 @@ std::wstring FormatDuration(UINT64 totalMilliseconds)
     return buffer;
 }
 
+void DrawListboxItem(std::wstring_view text, HDC hdc, const RECT& rcItem, UINT itemState)
+{
+    int backgroundColorIndex = (itemState & ODS_HOTLIGHT) ? COLOR_MENUHILIGHT :
+                     (itemState & ODS_SELECTED) ? COLOR_HIGHLIGHT : COLOR_WINDOW;
+    COLORREF textColor = GetSysColor((itemState & (ODS_SELECTED | ODS_HOTLIGHT)) ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
+
+    HBRUSH backgroundBrush = GetSysColorBrush(backgroundColorIndex);
+    FillRect(hdc, &rcItem, backgroundBrush);
+
+    SetBkMode(hdc, TRANSPARENT);
+    SetTextColor(hdc, textColor);
+    RECT textRect = rcItem;
+    textRect.left += 4;
+
+    HFONT oldFont = (HFONT)SelectObject(hdc, g_hLabelFont);
+    DrawText(hdc, text.data(), int(text.size()), &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
+    SelectObject(hdc, oldFont);
+
+    if (itemState & ODS_FOCUS)
+    {
+        DrawFocusRect(hdc, &rcItem);
+    }
+}
+
 LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam)
 {
     switch (message)
@@ -2167,6 +2404,65 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         }
         break;
 
+    case WM_MOUSEMOVE:
+    case WM_LBUTTONDOWN:
+    {
+        // Track mouse over pie chart and calendar for hover effects.
+        POINT point = { GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam) };
+        HWND hwndUnderMouse = ChildWindowFromPoint(hWnd, point);
+        HWND listboxHwnd = nullptr;
+
+        int newHoveredIndex = -1;
+        bool changeHappened = false;
+
+        if (hwndUnderMouse == g_hwndPieChart || hwndUnderMouse == g_hwndCalendar)
+        {
+            // Convert to client coordinates of the pie chart.
+            RECT controlRect;
+            GetClientRect(hwndUnderMouse, &controlRect);
+            MapWindowPoints(hWnd, hwndUnderMouse, &point, 1);
+
+            if (hwndUnderMouse == g_hwndPieChart)
+            {
+                newHoveredIndex = MapPieChartCoordinateToTaskIndex(point, controlRect);
+                listboxHwnd = g_hwndAggregatedTimeEntriesList;
+                UpdateListboxHoverIndex(listboxHwnd, /*inout*/ g_hoveredAggregateEntryIndex, newHoveredIndex);
+            }
+            else // hwndUnderMouse == g_hwndCalendar
+            {
+                listboxHwnd = g_hwndTimeEntriesList;
+                newHoveredIndex = MapCalendarCoordinateToTimeEntryIndex(point, controlRect);
+                UpdateListboxHoverIndex(listboxHwnd, /*inout*/ g_hoveredTimeEntryIndex, newHoveredIndex);
+            }
+
+            // On click, ensure the item is visible.
+            if (message == WM_LBUTTONDOWN && newHoveredIndex != -1)
+            {
+                //SendMessage(g_hwndTimeEntriesList, LB_SETCURSEL, newHoveredTimeEntryIndex, 0);
+                //--UpdateLastSelectedTimeToSelectedEntry(newHoveredTimeEntryIndex);
+                EnsureListboxIndexVisible(listboxHwnd, newHoveredIndex);
+            }
+        }
+
+        // Enable mouse leave tracking.
+        TRACKMOUSEEVENT tme =
+        {
+            .cbSize = sizeof(tme),
+            .dwFlags = TME_LEAVE,
+            .hwndTrack = hWnd,
+        };
+        TrackMouseEvent(&tme);
+    }
+    break;
+
+    case WM_MOUSELEAVE:
+    {
+        // Clear hover states when mouse leaves the window.
+        UpdateListboxHoverIndex(g_hwndAggregatedTimeEntriesList, g_hoveredAggregateEntryIndex, -1);
+        UpdateListboxHoverIndex(g_hwndTimeEntriesList, g_hoveredTimeEntryIndex, -1);
+    }
+    break;
+
     case WM_DRAWITEM:
     {
         LPDRAWITEMSTRUCT drawItemStruct = (LPDRAWITEMSTRUCT)lParam;
@@ -2179,17 +2475,6 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
             const TimeEntry& entry = g_timeEntries[index];
 
-            COLORREF colorBackground = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHT : COLOR_WINDOW);
-            COLORREF colorText = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
-
-            HBRUSH backgroundBrush = CreateSolidBrush(colorBackground);
-            FillRect(drawItemStruct->hDC, &drawItemStruct->rcItem, backgroundBrush);
-            DeleteObjectAndNullify(backgroundBrush);
-
-            RECT textRect = drawItemStruct->rcItem;
-            textRect.left += 5;
-            textRect.top += 3;
-
             // Format: "YYYY-MM-DD HH:MM:SS (duration) - ProcessName - WindowTitle"
             std::wstring text = FormatTime(entry.startTime) +
                                 L" (" + FormatDuration(entry.durationMilliseconds) + L") - " +
@@ -2200,16 +2485,13 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 text = text.substr(0, 252) + L"...";
             }
 
-            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
-            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
-            SetTextColor(drawItemStruct->hDC, colorText);
-            DrawText(drawItemStruct->hDC, text.c_str(), int(text.size()), &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
-            SelectObject(drawItemStruct->hDC, oldFont);
-
-            if (drawItemStruct->itemState & ODS_FOCUS)
+            auto itemState = drawItemStruct->itemState;
+            if (g_hoveredTimeEntryIndex == (int)index)
             {
-                DrawFocusRect(drawItemStruct->hDC, &drawItemStruct->rcItem);
+                itemState |= ODS_HOTLIGHT; // Show hovered color.
             }
+
+            DrawListboxItem(text, drawItemStruct->hDC, drawItemStruct->rcItem, itemState);
         }
         else if (drawItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
         {
@@ -2218,39 +2500,25 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 break;
 
             const AggregatedTimeEntry& entry = g_aggregatedEntries[index];
-
-            COLORREF colorBackground = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHT : COLOR_WINDOW);
-            COLORREF colorText = GetSysColor((drawItemStruct->itemState & ODS_SELECTED) ? COLOR_HIGHLIGHTTEXT : COLOR_WINDOWTEXT);
-
-            HBRUSH backgroundBrush = CreateSolidBrush(colorBackground);
-            FillRect(drawItemStruct->hDC, &drawItemStruct->rcItem, backgroundBrush);
-            DeleteObjectAndNullify(backgroundBrush);
-
-            HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
-            SetBkMode(drawItemStruct->hDC, TRANSPARENT);
-            SetTextColor(drawItemStruct->hDC, colorText);
-
-            RECT textRect = drawItemStruct->rcItem;
-            textRect.left += 5;
+            bool isHovered = ();
 
             // Format: "duration (percentage%) - ProcessName"
-            WCHAR buffer[256];
+            WCHAR textBuffer[256];
             swprintf_s(
-                buffer,
+                textBuffer,
                 L"%s (%04.1f%%) - %s",
                 FormatDuration(entry.totalMilliseconds).c_str(),
                 entry.percentage,
                 entry.processName.c_str()
             );
 
-            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
-
-            SelectObject(drawItemStruct->hDC, oldFont);
-
-            if (drawItemStruct->itemState & ODS_FOCUS)
+            auto itemState = drawItemStruct->itemState;
+            if (g_hoveredAggregateEntryIndex == (int)index)
             {
-                DrawFocusRect(drawItemStruct->hDC, &drawItemStruct->rcItem);
+                itemState |= ODS_HOTLIGHT; // Show hovered color.
             }
+
+            DrawListboxItem(textBuffer, drawItemStruct->hDC, drawItemStruct->rcItem, itemState);
         }
         else if (drawItemStruct->CtlID == IDC_PIECHART)
         {
