@@ -30,7 +30,10 @@ Just Windows 7+, x86 or x64 CPU.
 - **Enter/F5**: Start/stop time tracking
 - **Escape/F8**: Stops time tracking
 - **Delete**: Remove selected time entries
-- **Double-click**/**F2**: Edit entry details
+- **F2**/**Double-click**: Edit entry details
+
+## Mouse
+- **Hover**/**Left click**: Over pie chart or calendar item to see matching time entry/task. Click to scroll it into view.
 
 ## Technical Implementation
 
