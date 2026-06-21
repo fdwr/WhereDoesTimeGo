@@ -762,7 +762,7 @@ LRESULT CALLBACK EmptyListboxSubclassProcedure(HWND hWnd, UINT uMsg, WPARAM wPar
                 SetBkColor(hdc, GetSysColor(COLOR_WINDOW));
                 SetBkMode(hdc, OPAQUE);
                 SetTextColor(hdc, GetSysColor(COLOR_GRAYTEXT));
-                DrawText(hdc, message, -1, &clientRect, DT_SINGLELINE | DT_CENTER | DT_VCENTER);
+                DrawText(hdc, message, -1, &clientRect, DT_SINGLELINE | DT_CENTER | DT_VCENTER | DT_NOPREFIX);
                 SelectObject(hdc, oldFont);
             }
 
@@ -2186,7 +2186,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
             HFONT oldFont = (HFONT)SelectObject(drawItemStruct->hDC, g_hLabelFont);
             SetBkMode(drawItemStruct->hDC, TRANSPARENT);
             SetTextColor(drawItemStruct->hDC, colorText);
-            DrawText(drawItemStruct->hDC, text.c_str(), int(text.size()), &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+            DrawText(drawItemStruct->hDC, text.c_str(), int(text.size()), &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
             SelectObject(drawItemStruct->hDC, oldFont);
 
             if (drawItemStruct->itemState & ODS_FOCUS)
@@ -2226,7 +2226,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 entry.processName.c_str()
             );
 
-            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT);
+            DrawText(drawItemStruct->hDC, buffer, -1, &textRect, DT_SINGLELINE | DT_VCENTER | DT_LEFT | DT_NOPREFIX);
 
             SelectObject(drawItemStruct->hDC, oldFont);
 
