@@ -965,6 +965,8 @@ Gdiplus::Color GetChartColor(int i)
     return color;
 };
 
+constexpr int c_pieChartMargin = 50;
+
 void DrawPieChart(HDC hdc, RECT& rect)
 {
     int width = rect.right - rect.left;
@@ -981,13 +983,13 @@ void DrawPieChart(HDC hdc, RECT& rect)
     COLORREF backgroundColor = GetSysColor(COLOR_BTNFACE);
     graphics.Clear(Gdiplus::Color(255, GetRValue(backgroundColor), GetGValue(backgroundColor), GetBValue(backgroundColor)));
 
-    int diameter = std::min(width, height) - 100;
+    int diameter = std::min(width, height) - (c_pieChartMargin * 2);
     int centerX = width / 2;
     int centerY = height / 2;
     int x = centerX - diameter / 2;
     int y = centerY - diameter / 2;
 
-    float startAngle = 0.0f;
+    float startAngle = -90.0f; // Start at 12 o'clock (top) instead of 3 o'clock (right).
 
     // Draw pie slices.
     for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
@@ -1260,7 +1262,7 @@ int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect)
         return -1;
 
     // Calculate pie chart geometry (must match DrawPieChart).
-    int diameter = std::min(width, height) - 100;
+    int diameter = std::min(width, height) - (c_pieChartMargin * 2);
     int centerX = width / 2;
     int centerY = height / 2;
     int radius = diameter / 2;
@@ -1272,27 +1274,22 @@ int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect)
     if (distanceSquared > radius * radius)
         return -1; // Outside the pie.
 
-    // Calculate angle from center.
-    // GDI+ FillPie uses: 0 degrees = 3 o'clock (right), positive = clockwise.
-    // atan2(dy, dx) with screen coordinates (y down) gives:
-    //   - 0 degrees at 3 o'clock (right)
-    //   - positive angles going clockwise (since y increases downward)
-    // This matches GDI+ directly!
-    float angleRadians = atan2f((float)dy, (float)dx);
-    float angleDegrees = angleRadians * 180.0f / 3.14159265358979323846f;
+    // Calculate angle from center, where straight (12 o'clock noon) is zero degrees.
+    float angleRadians = atan2f((float)dx, (float)-dy);
+    float anglePercent = float(angleRadians * 100 / (2 * M_PI)); // Sadly C++ is missing tau.
 
-    // Normalize to [0, 360) range.
-    if (angleDegrees < 0)
-        angleDegrees += 360.0f;
+    // Normalize to [0, 100) range.
+    if (anglePercent < 0)
+        anglePercent += 100.0f;
 
     // Match against pie slices.
     float startAngle = 0.0f;
-    for (size_t i = 0; i < g_aggregatedEntries.size(); i++)
+    for (size_t i = 0, c = g_aggregatedEntries.size(); i < c; i++)
     {
-        float sweepAngle = g_aggregatedEntries[i].percentage * 3.6f;
+        float sweepAngle = g_aggregatedEntries[i].percentage;
         float endAngle = startAngle + sweepAngle;
 
-        if (angleDegrees >= startAngle && angleDegrees < endAngle)
+        if (anglePercent >= startAngle && anglePercent < endAngle)
             return (int)i;
 
         startAngle = endAngle;
@@ -2485,12 +2482,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 text = text.substr(0, 252) + L"...";
             }
 
-            auto itemState = drawItemStruct->itemState;
-            if (g_hoveredTimeEntryIndex == (int)index)
-            {
-                itemState |= ODS_HOTLIGHT; // Show hovered color.
-            }
-
+            auto itemState = drawItemStruct->itemState | (g_hoveredTimeEntryIndex == (int)index ? ODS_HOTLIGHT : 0);
             DrawListboxItem(text, drawItemStruct->hDC, drawItemStruct->rcItem, itemState);
         }
         else if (drawItemStruct->CtlID == IDC_AGGREGATED_TIME_ENTRY_LIST)
@@ -2500,7 +2492,6 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 break;
 
             const AggregatedTimeEntry& entry = g_aggregatedEntries[index];
-            bool isHovered = ();
 
             // Format: "duration (percentage%) - ProcessName"
             WCHAR textBuffer[256];
@@ -2512,12 +2503,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 entry.processName.c_str()
             );
 
-            auto itemState = drawItemStruct->itemState;
-            if (g_hoveredAggregateEntryIndex == (int)index)
-            {
-                itemState |= ODS_HOTLIGHT; // Show hovered color.
-            }
-
+            auto itemState = drawItemStruct->itemState | (g_hoveredAggregateEntryIndex == (int)index ? ODS_HOTLIGHT : 0);;
             DrawListboxItem(textBuffer, drawItemStruct->hDC, drawItemStruct->rcItem, itemState);
         }
         else if (drawItemStruct->CtlID == IDC_PIECHART)

@@ -5,6 +5,8 @@
 // set the _WIN32_WINNT macro to the platform you wish to support before including SDKDDKVer.h.
 #include <SDKDDKVer.h>
 
+#define _USE_MATH_DEFINES 
+
 // Windows header files
 #define WIN32_LEAN_AND_MEAN             // Exclude rarely-used stuff from Windows headers
 #define NOMINMAX                        // Prevent Windows headers from defining min and max macros, which confuses GDI+
