@@ -1734,7 +1734,7 @@ void SaveToCSV(HWND hWnd, bool alwaysAskForName, bool askForNameIfNeeded)
 void SaveToCSV(HWND hWnd, wchar_t const* filePath)
 {
     std::wstringstream csvData;
-    csvData << L"Window Title,Process Name,Start Time,End Time,Duration (seconds)\n";
+    csvData << L"Window Title,Process Name,Start Time,End Time\n";
 
     for (const auto& entry : g_timeEntries)
     {
