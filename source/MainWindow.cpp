@@ -2470,8 +2470,8 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
                 UpdateListboxHoverIndex(listboxHwnd, /*inout*/ g_hoveredTimeEntryIndex, newHoveredIndex);
             }
 
-            // On click, ensure the item is visible.
-            if (message == WM_LBUTTONDOWN && newHoveredIndex != -1)
+            // On click or drag, ensure the item is visible.
+            if ((wParam & MK_LBUTTON) && newHoveredIndex != -1)
             {
                 EnsureListboxIndexVisible(listboxHwnd, newHoveredIndex);
             }
