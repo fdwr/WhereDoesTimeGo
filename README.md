@@ -69,6 +69,7 @@ I looked over these - some were closer than others to my needs:
 - [DRYTRIX TimeTracker](https://github.com/DRYTRIX/TimeTracker) - ✅ does a lot of stuff I don't need (generating invoices? client billing?). ❌ Another web interface thing.
 - [Tockler](https://tockler.trimatech.dev/) - actually this *might* fit my needs (need to play with it), but I didn't find it until after I wrote this 😅.
 - [ProcrastiTracker](https://github.com/aardappel/procrastitracker) - another that might fit my needs, that I didn't find until *after* writing mine 😅.
+- [TimeTracker](https://ttracker.sourceforge.net/) [*](https://sourceforge.net/projects/ttracker/) by Roland Bennett ✅ task editing, pie chart, item sorting, CSV export, portable app, tree view ❌ want larger calendar and day view.
 
 ## Future Ideas
 
