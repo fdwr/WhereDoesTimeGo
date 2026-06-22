@@ -1,6 +1,6 @@
 # WhereDoesTimeGo - Windows Time Tracker
 
-This program can record your active window usage and display a pie chart of program usage so you know where you spend your time. I wrote it because every other one I tried just didn't do what I needed - this is just a simple native Windows app (no bloated Electron app resource hog, no backend subscription thingie, no background service, no Python or WPF or .NET installation needed...).
+This program can record your active window usage and display a pie chart of program usage so you know where you spend your time. I wrote it because every other one I tried didn't do quite what I needed - this is just a simple native Windows app (no bloated Electron app resource hog, no installer needed, no corporate subscription, no background service, no Python or WPF or .NET installation needed...).
 
     ⏰ A profiler for your life,
     💧 A leak detector for your day,
