@@ -43,6 +43,7 @@ struct TimeEntry
     void ResetStartAndEndTimeToNow();
     void SetStartTimeToEndTime();
     void SetEndTimeToNow(); // Wrap up this entry by setting the end time to now and calculating the duration.
+    void RecomputeDuration();
 };
 
 struct AggregatedTimeEntry
@@ -499,6 +500,7 @@ void StartTracking(HWND hWnd)
     if (!g_isTrackingTime)
     {
         g_isTrackingTime = true;
+        GetSystemTime(&g_lastRecordedTime); // Reset selected time to now.
         SetFileModifiedState(true);
         UpdateTrackingTimer();
 
@@ -662,24 +664,29 @@ void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry)
 
     SetFileModifiedState(true);
 
+    SYSTEMTIME now;
+    GetSystemTime(&now);
+
     // Try to merge this entry with the previous one if it's the same window & process
     // and the entry is consistent with the last recorded time (to rule out weird effects
     // where you delete an entry in the middle of recording, which causes the last entry's
     // end time to update to now and suddenly introduce a large gap).
-    // or append a new entry.
     if (tryToMergeWithPreviousEntry && !g_timeEntries.empty())
     {
         TimeEntry& lastEntry = g_timeEntries.back();
 
-        if (IsSystemTimeAfterOrEqual(lastEntry.endTime, g_lastRecordedTime) &&
-            lastEntry.processName == processName &&
-            WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
+        // Update the end time of the last time entry.
+        if (IsSystemTimeAfterOrEqual(lastEntry.endTime, g_lastRecordedTime))
         {
-            // Continue the previous entry since it's the same window.
-            lastEntry.SetEndTimeToNow();
-            g_lastRecordedTime = lastEntry.endTime;
+            lastEntry.endTime = now;
+            g_lastRecordedTime = now;
+            lastEntry.RecomputeDuration();
 
-            return;
+            if (lastEntry.processName == processName && WindowTitlesAreEquivalent(lastEntry.windowTitle, windowTitle))
+            {
+                // Continue the previous entry since it's the same window.
+                return;
+            }
         }
         // Different window. So fall through to add a new entry...
     }
@@ -688,9 +695,11 @@ void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry)
     {
         .windowTitle = windowTitle,
         .processName = processName,
+        .startTime = now,
+        .endTime = now,
+        .durationMilliseconds = 0,
     };
-    newEntry.ResetStartAndEndTimeToNow();
-    g_lastRecordedTime = newEntry.endTime;
+    g_lastRecordedTime = now;
 
     g_timeEntries.push_back(std::move(newEntry));
 }
@@ -2018,7 +2027,7 @@ void AddLapEntry(HWND hWnd)
         g_timeEntries.reserve(g_timeEntries.size() + 1);
         g_timeEntries.push_back(g_timeEntries.back());
         g_timeEntries.back().SetStartTimeToEndTime();
-        g_lastRecordedTime = g_timeEntries.back().startTime;
+        g_lastRecordedTime = g_timeEntries.back().endTime;
     }
 
     SetFileModifiedState(true);
@@ -2104,6 +2113,11 @@ void TimeEntry::SetStartTimeToEndTime()
 void TimeEntry::SetEndTimeToNow()
 {
     GetSystemTime(&endTime);
+    durationMilliseconds = CalculateDurationInMilliseconds(startTime, endTime);
+}
+
+void TimeEntry::RecomputeDuration()
+{
     durationMilliseconds = CalculateDurationInMilliseconds(startTime, endTime);
 }
 
