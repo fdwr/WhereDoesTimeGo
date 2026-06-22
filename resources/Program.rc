@@ -65,24 +65,25 @@ BEGIN
     END
     POPUP "&Edit"
     BEGIN
-        MENUITEM "&Edit Selected\tF2",  IDM_EDIT
-        MENUITEM "&Insert Entry...\tIns", IDM_INSERT
-        MENUITEM "&Delete Selected\tDel", IDM_DELETE
-        MENUITEM "&Clear All Entries",  IDM_CLEAR_ENTRIES
+        MENUITEM "&Edit Selected\tF2",          IDM_EDIT
+        MENUITEM "&Insert Entry...\tIns",       IDM_INSERT
+        MENUITEM "&Delete Selected\tDel",       IDM_DELETE
+        MENUITEM "&Clear All Entries",          IDM_CLEAR_ENTRIES
     END
     POPUP "&Track"
     BEGIN
-        MENUITEM "&Start Tracking\tEnter/F5", IDM_START_TIME_TRACKING
-        MENUITEM "S&top Tracking\tEscape/F8", IDM_STOP_TIME_TRACKING
-        MENUITEM "Add &Lap\tF6",        IDM_ADD_LAP_ENTRY
+        MENUITEM "&Start Tracking\tEnter/F5",   IDM_START_TIME_TRACKING
+        MENUITEM "S&top Tracking\tEscape/F8",   IDM_STOP_TIME_TRACKING
+        MENUITEM "Add &Lap\tF6",                IDM_ADD_LAP_ENTRY
         MENUITEM "", 0, MFT_SEPARATOR, 0
+        MENUITEM "Track Child Dialogs",         IDM_TRACK_CHILD_DIALOGS
         POPUP "Polling &Frequency"
         BEGIN
             MENUITEM "Never (just use SetWinEventHook)", IDM_POLLING_NEVER
-            MENUITEM "1 Second",        IDM_POLLING_1SEC
-            MENUITEM "10 Seconds",      IDM_POLLING_10SEC
-            MENUITEM "60 Seconds",      IDM_POLLING_60SEC
-            MENUITEM "10 Minutes",      IDM_POLLING_10MIN
+            MENUITEM "1 Second",                IDM_POLLING_1SEC
+            MENUITEM "10 Seconds",              IDM_POLLING_10SEC
+            MENUITEM "60 Seconds",              IDM_POLLING_60SEC
+            MENUITEM "10 Minutes",              IDM_POLLING_10MIN
         END
     END
     POPUP "&View"

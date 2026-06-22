@@ -80,6 +80,7 @@ bool g_showTimer = true;
 bool g_saveOnExit = false;
 bool g_showAwayTime = true;
 bool g_showSelf = true;
+bool g_trackChildDialogs = true;
 int g_pollingInterval = DEFAULT_POLLING_INTERVAL;
 
 std::vector<TimeEntry> g_timeEntries;
@@ -621,17 +622,24 @@ void RecordActiveWindowDetails(bool tryToMergeWithPreviousEntry)
     WCHAR title[256] = {};
 
     HWND hForeground = GetForegroundWindow();
-    if (hForeground)
+
+    // There can be weird transient states where the foreground window is null , such as when the user
+    // is coming out from the lock screen and the original foreground window has not been reset yet.
+    if (hForeground == nullptr)
     {
-        // Check if this is an owned window (e.g., a dialog).
-        // If so, use the owner window instead to get the main application window
+        return; // There is no foreground window.
+    }
+
+    if (!g_trackChildDialogs)
+    {
+        // Get the main application window rather the the dialog name.
         HWND hOwner = GetWindow(hForeground, GW_OWNER);
         if (hOwner)
         {
             hForeground = hOwner;
         }
-        GetWindowText(hForeground, title, 256);
     }
+    GetWindowText(hForeground, title, 256);
 
     std::wstring windowTitle = title;
     std::wstring processName = GetProcessName(hForeground);
@@ -765,7 +773,8 @@ std::wstring GetProcessName(HWND hWnd)
         }
     }
 
-    return L"Unknown";
+    std::wstring name = std::format(L"Unknown{}-{}", processId, int(hWnd));
+    return name;
 }
 
 LRESULT CALLBACK EmptyListboxSubclassProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData)
@@ -1863,6 +1872,7 @@ void SaveSettings()
     
     file << L"\n[Track]\n";
     file << L"PollingInterval=" << g_pollingInterval << L"\n";
+    file << L"TrackChildDialogs=" << g_trackChildDialogs << L"\n";
     
     file.close();
 }
@@ -1928,6 +1938,7 @@ void LoadSettings()
     g_showSelf = ParseBool(settings[L"View.ShowSelf"], true);
     g_saveOnExit = ParseBool(settings[L"File.SaveOnExit"], false);
     g_pollingInterval = ParseInt(settings[L"Track.PollingInterval"], DEFAULT_POLLING_INTERVAL);
+    g_trackChildDialogs = ParseBool(settings[L"Track.TrackChildDialogs"], true);
 }
 
 void SortTimeEntriesByTime()
@@ -2007,8 +2018,8 @@ void AddLapEntry(HWND hWnd)
         g_timeEntries.reserve(g_timeEntries.size() + 1);
         g_timeEntries.push_back(g_timeEntries.back());
         g_timeEntries.back().SetStartTimeToEndTime();
+        g_lastRecordedTime = g_timeEntries.back().startTime;
     }
-    g_lastRecordedTime = g_timeEntries.back().startTime;
 
     SetFileModifiedState(true);
     RefreshUI();
@@ -2267,6 +2278,7 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         CheckMenuItem(hMenu, IDM_POLLING_10SEC, MF_BYCOMMAND | (g_pollingInterval == 10000 ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_POLLING_60SEC, MF_BYCOMMAND | (g_pollingInterval == 60000 ? MF_CHECKED : MF_UNCHECKED));
         CheckMenuItem(hMenu, IDM_POLLING_10MIN, MF_BYCOMMAND | (g_pollingInterval == 600000 ? MF_CHECKED : MF_UNCHECKED));
+        CheckMenuItem(hMenu, IDM_TRACK_CHILD_DIALOGS, MF_BYCOMMAND | (g_trackChildDialogs ? MF_CHECKED : MF_UNCHECKED));
     }
     break;
 
@@ -2383,6 +2395,9 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
         case IDM_POLLING_10MIN:
             g_pollingInterval = 600000;
             UpdateTrackingTimer();
+            break;
+        case IDM_TRACK_CHILD_DIALOGS:
+            g_trackChildDialogs = !g_trackChildDialogs;
             break;
         case IDM_LOGS_FOLDER:
             {
