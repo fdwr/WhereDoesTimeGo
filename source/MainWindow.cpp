@@ -2725,22 +2725,19 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
             HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
             HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
 
-            SYSTEMTIME localStartTime, localEndTime, startTime, endTime;
-            DateTime_GetSystemtime(hDateTimeStart, &startTime);
-            DateTime_GetSystemtime(hDateTimeEnd, &endTime);
-            if (!IsSystemTimeAfterOrEqual(endTime, startTime))
+            SYSTEMTIME localStartTime, localEndTime;
+            DateTime_GetSystemtime(hDateTimeStart, &localStartTime);
+            DateTime_GetSystemtime(hDateTimeEnd, &localEndTime);
+            if (!IsSystemTimeAfterOrEqual(localEndTime, localStartTime))
             {
-                endTime = startTime;
-                DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &endTime);
+                localEndTime = localStartTime;
+                DateTime_SetSystemtime(hDateTimeEnd, GDT_VALID, &localEndTime);
                 MessageBox(hDlg, L"End time cannot be before start time. End time has been set to match start time.", L"Invalid Time Range", MB_OK | MB_ICONWARNING);
                 return (INT_PTR)TRUE;
             }
                
-            TzSpecificLocalTimeToSystemTime(nullptr, &localStartTime, &startTime);
-            TzSpecificLocalTimeToSystemTime(nullptr, &localEndTime, &endTime);
-
-            entry.startTime = startTime;
-            entry.endTime = endTime;
+            TzSpecificLocalTimeToSystemTime(nullptr, &localStartTime, &entry.startTime);
+            TzSpecificLocalTimeToSystemTime(nullptr, &localEndTime, &entry.endTime);
             entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
 
             EndDialog(hDlg, IDOK);
