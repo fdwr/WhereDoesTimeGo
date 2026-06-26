@@ -51,10 +51,10 @@ Requires:
 
 ## CSV Format
 
-- Window Title (quoted)
+- Start Time UTC (YYYY-MM-DD HH:MM:SS.mmm) Excel custom format = yyyy-mm-dd hh:mm:ss.000
+- End Time UTC (YYYY-MM-DD HH:MM:SS.mmm) Excel custom format = yyyy-mm-dd hh:mm:ss.000
 - Process Name
-- Start Time (YYYY-MM-DD HH:MM:SS)
-- End Time (YYYY-MM-DD HH:MM:SS)
+- Window Title (quoted)
 
 ## Other Apps
 

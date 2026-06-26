@@ -104,7 +104,7 @@ ATOM MyRegisterClass(HINSTANCE hInstance);
 BOOL InitalizeInstance(HINSTANCE hInstance, int nCmdShow);
 LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK EditTimeEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 LRESULT CALLBACK EmptyListboxSubclassProcedure(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM lParam, UINT_PTR uIdSubclass, DWORD_PTR dwRefData);
 void CALLBACK WinEventHookProcedure(HWINEVENTHOOK hWinEventHook, DWORD event, HWND hwnd, LONG idObject, LONG idChild, DWORD dwEventThread, DWORD dwmsEventTime);
 
@@ -162,7 +162,7 @@ void ClearAllEntries(HWND hWnd, bool isNewFile);
 
 bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2);
 UINT64 CalculateDurationInMilliseconds(const SYSTEMTIME& start, const SYSTEMTIME& end);
-std::wstring FormatTime(const SYSTEMTIME& time);
+std::wstring FormatDateTime(const SYSTEMTIME& time, bool adjustToLocalTime);
 std::wstring FormatDuration(UINT64 milliseconds);
 
 int APIENTRY wWinMain(
@@ -1734,7 +1734,7 @@ void SaveToCSV(HWND hWnd, bool alwaysAskForName, bool askForNameIfNeeded)
 void SaveToCSV(HWND hWnd, wchar_t const* filePath)
 {
     std::wstringstream csvData;
-    csvData << L"Window Title,Process Name,Start Time,End Time\n";
+    csvData << L"Start Time,End Time,Process Name,Window Title\n";
 
     for (const auto& entry : g_timeEntries)
     {
@@ -1744,10 +1744,10 @@ void SaveToCSV(HWND hWnd, wchar_t const* filePath)
         std::replace(windowTitle.begin(), windowTitle.end(), L'\r', L' ');
         std::replace(windowTitle.begin(), windowTitle.end(), L'"', L'\'');
 
-        csvData << L"\"" << windowTitle << L"\","
+        csvData << FormatDateTime(entry.startTime, /*adjustToLocalTime*/ false) << L","
+                << FormatDateTime(entry.endTime, /*adjustToLocalTime*/ false) << L","
                 << entry.processName << L","
-                << FormatTime(entry.startTime) << L","
-                << FormatTime(entry.endTime) << L"\n";
+                << L"\"" << windowTitle << L"\"\n";
 
         // Don't save durationSeconds, since it can be recomputed and removes potential inconsistencies if the file is edited manually.
     }
@@ -1780,45 +1780,50 @@ bool ParseCSVEntries(const std::wstring& fileContent, std::vector<TimeEntry>& ou
 
         TimeEntry entry = {};
 
-        size_t position1 = line.find(L'"');
-        size_t position2 = line.find(L'"', position1 + 1);
-        if (position1 != std::wstring::npos && position2 != std::wstring::npos)
-        {
-            entry.windowTitle = line.substr(position1 + 1, position2 - position1 - 1);
-            line = line.substr(position2 + 2);
-        }
-        else
-        {
-            continue;
-        }
-
         std::wstringstream ss(line);
         std::wstring token;
-
-        std::getline(ss, entry.processName, L',');
 
         std::getline(ss, token, L',');
         int scannedStart = swscanf_s(
             token.c_str(),
-            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu",
-            &entry.startTime.wYear, &entry.startTime.wMonth, &entry.startTime.wDay,
-            &entry.startTime.wHour, &entry.startTime.wMinute, &entry.startTime.wSecond
+            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu.%03hu",
+            &entry.startTime.wYear, &entry.startTime.wMonth,  &entry.startTime.wDay,
+            &entry.startTime.wHour, &entry.startTime.wMinute, &entry.startTime.wSecond,
+            &entry.startTime.wMilliseconds
         );
 
+        token.clear(); // Sadly getline doesn't clear the token string on end-of-file, just leaving previous litter.
         std::getline(ss, token, L',');
         int scannedEnd = swscanf_s(
             token.c_str(),
-            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu",
-            &entry.endTime.wYear, &entry.endTime.wMonth, &entry.endTime.wDay,
-            &entry.endTime.wHour, &entry.endTime.wMinute, &entry.endTime.wSecond
+            L"%04hu-%02hu-%02hu %02hu:%02hu:%02hu.%03hu",
+            &entry.endTime.wYear, &entry.endTime.wMonth,  &entry.endTime.wDay,
+            &entry.endTime.wHour, &entry.endTime.wMinute, &entry.endTime.wSecond,
+            &entry.endTime.wMilliseconds
         );
+        // Expect scannedStart == 7 && scannedEnd == 7.
 
         entry.durationMilliseconds = CalculateDurationInMilliseconds(entry.startTime, entry.endTime);
 
-        if (scannedStart == 6 && scannedEnd == 6)
+        std::getline(ss, entry.processName, L',');
+
+        token.clear();
+        std::getline(ss, token, L',');
+
+        std::wstring_view tokenView = token;
+        size_t position1 = tokenView.find(L'"');
+        if (position1 != std::wstring::npos)
         {
-            outEntries.push_back(entry);
+            tokenView = tokenView.substr(position1 + 1);
         }
+        size_t position2 = tokenView.find(L'"');
+        if (position2 != std::wstring::npos)
+        {
+            tokenView = tokenView.substr(0, position2);
+        }
+        entry.windowTitle = tokenView;
+
+        outEntries.push_back(entry);
     }
 
     return !outEntries.empty();
@@ -2042,7 +2047,7 @@ void InsertEntry(HWND hWnd)
 
     size_t selectedIndex = size_t(SendMessage(g_hwndTimeEntriesList, LB_GETCURSEL, 0, 0));
 
-    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
+    if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditTimeEntryDialog) == IDOK)
     {
         size_t insertionIndex = std::min(size_t(selectedIndex), g_timeEntries.size());
         g_timeEntries.insert(g_timeEntries.begin() + insertionIndex, g_editingEntry);
@@ -2060,7 +2065,7 @@ void EditSelectedEntry(HWND hWnd)
     if (selectedIndex < g_timeEntries.size())
     {
         g_editingEntry = g_timeEntries[selectedIndex];
-        if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditEntryDialog) == IDOK)
+        if (DialogBox(g_instanceHandle, MAKEINTRESOURCE(IDD_EDITENTRY), hWnd, &EditTimeEntryDialog) == IDOK)
         {
             if (selectedIndex < g_timeEntries.size()) // Retest again in case something changed while the dialog was open, like deletion of the entry being edited.
             {
@@ -2153,18 +2158,28 @@ bool IsSystemTimeAfterOrEqual(const SYSTEMTIME& time1, const SYSTEMTIME& time2)
     return time1.wMilliseconds >= time2.wMilliseconds;
 }
 
-std::wstring FormatTime(const SYSTEMTIME& time)
+// Use YYYY-MM-DD HH:MM:SS.mmm
+// Note we use a space to separate date and time rather than ISO's "T", which is easier to read visually
+// and works better with Excel when importing CSV files.
+std::wstring FormatDateTime(const SYSTEMTIME& time, bool adjustToLocalTime)
 {
     // Convert UTC time to local time for display.
-    SYSTEMTIME localTime;
-    SystemTimeToTzSpecificLocalTime(nullptr, &time, &localTime);
+    SYSTEMTIME displayTime;
+    if (adjustToLocalTime)
+    {
+        SystemTimeToTzSpecificLocalTime(nullptr, &time, &displayTime);
+    }
+    else
+    {
+        displayTime = time;
+    }
 
     WCHAR buffer[64];
     swprintf_s(
         buffer,
-        L"%04d-%02d-%02d %02d:%02d:%02d",
-        localTime.wYear, localTime.wMonth, localTime.wDay,
-        localTime.wHour, localTime.wMinute, localTime.wSecond
+        L"%04d-%02d-%02d %02d:%02d:%02d.%03d",
+        displayTime.wYear, displayTime.wMonth, displayTime.wDay,
+        displayTime.wHour, displayTime.wMinute, displayTime.wSecond, displayTime.wMilliseconds
     );
     return buffer;
 }
@@ -2508,8 +2523,8 @@ LRESULT CALLBACK WindowProcedure(HWND hWnd, UINT message, WPARAM wParam, LPARAM 
 
             const TimeEntry& entry = g_timeEntries[index];
 
-            // Format: "YYYY-MM-DD HH:MM:SS (duration) - ProcessName - WindowTitle"
-            std::wstring text = FormatTime(entry.startTime) +
+            // Format: "YYYY-MM-DD HH:MM:SS.mmm (duration) - ProcessName - WindowTitle"
+            std::wstring text = FormatDateTime(entry.startTime, /*adjustToLocalTime*/ true) +
                                 L" (" + FormatDuration(entry.durationMilliseconds) + L") - " +
                                 entry.processName + L" - " +
                                 entry.windowTitle;
@@ -2677,7 +2692,7 @@ INT_PTR CALLBACK AboutDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lPar
     return (INT_PTR)FALSE;
 }
 
-INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
+INT_PTR CALLBACK EditTimeEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 {
     UNREFERENCED_PARAMETER(lParam);
     switch (message)
@@ -2698,6 +2713,7 @@ INT_PTR CALLBACK EditEntryDialog(HWND hDlg, UINT message, WPARAM wParam, LPARAM 
         HWND hDateTimeStart = GetDlgItem(hDlg, IDC_DATETIME_START);
         HWND hDateTimeEnd = GetDlgItem(hDlg, IDC_DATETIME_END);
 
+        // Sadly the date time picker control does not support milliseconds. So we will just display seconds.
         DateTime_SetFormat(hDateTimeStart, L"yyyy'-'MM'-'dd HH':'mm':'ss");
         DateTime_SetFormat(hDateTimeEnd, L"yyyy'-'MM'-'dd HH':'mm':'ss");
 
