@@ -77,4 +77,3 @@ Note I'm probably not going invest much more into this program (this took 3 days
 
 - Manual mode when you select a different task to add time entries (like cool ATracker).
 - Allow entering custom tasks.
-- Compare CSV format with other CSV-capable apps, and either adapt my CSV fields for compatibility, or support loading them.
