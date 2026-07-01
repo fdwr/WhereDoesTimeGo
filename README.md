@@ -38,8 +38,9 @@ Just Windows 7+, x86 or x64 CPU.
 ## Technical Implementation
 
 - Focus switches are detected with a combination of polling `WM_TIMER` and event hooks via `SetWinEventHook` with `EVENT_SYSTEM_FOREGROUND` (less intrusive than `SetWindowsHookEx`). Each time, `GetSystemTime` is called to log the time.
-- The application checks the current window using `GetForegroundWindow` and `GetWindowText`, ignoring little popup dialogs (detected via `GetWindow` with `GW_OWNER`) and retrieving the parent instead.
+- The application checks the current window using `GetForegroundWindow` and `GetWindowText`, optionally ignoring little popup dialogs (detected via `GetWindow` with `GW_OWNER`) and retrieving the parent instead.
 - The process name is retrieved via `OpenProcess` with `PROCESS_QUERY_LIMITED_INFORMATION` and `QueryFullProcessImageName` rather than `GetModuleFileNameEx` (which purportedly avoids issues 32-bit vs 64-bit processes and has fewer issues with security restrictions). If that can't retrieved, use the window class name as a fallback.
+- For UWP apps which hide the true process name behind extra layers, call `GetGUIThreadInfo` to get `hwndFocus` instead of `GetForegroundWindow`.
 - Any session locks or power management events are detected via `WM_POWERBROADCAST` and `WM_WTSSESSION_CHANGE` messages (enabled by `WTSRegisterSessionNotification` call) so the app can sleep.
 
 ## Building
