@@ -1285,9 +1285,9 @@ int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect)
 
     // Calculate pie chart geometry (must match DrawPieChart).
     int diameter = std::min(width, height) - (c_pieChartMargin * 2);
-    int centerX = width / 2;
-    int centerY = height / 2;
-    int radius = diameter / 2;
+    int centerX  = width / 2;
+    int centerY  = height / 2;
+    int radius   = diameter / 2;
 
     // Check if point is within the pie circle.
     int dx = pt.x - centerX;
@@ -1298,7 +1298,7 @@ int MapPieChartCoordinateToTaskIndex(POINT pt, RECT& rect)
 
     // Calculate angle from center, where straight (12 o'clock noon) is zero degrees.
     float angleRadians = atan2f((float)dx, (float)-dy);
-    float anglePercent = float(angleRadians * 100 / (2 * M_PI)); // Sadly C++ is missing tau.
+    float anglePercent = float(angleRadians * 100 / (std::numbers::pi_v<float> * 2)); // Sadly C++ is missing tau.
 
     // Normalize to [0, 100) range.
     if (anglePercent < 0)
