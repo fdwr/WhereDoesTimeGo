@@ -958,6 +958,8 @@ void RecalculateAggregatedData()
     );
 }
 
+// Normally you might expect a rainbow to be ordered ROYGBIV, but for increased contrast of adjacent entries,
+// rearrange them to be more visually distinct, putting {red, blue, green} first.
 Gdiplus::Color g_chartColors[] =
 {
     Gdiplus::Color(255,  66, 133, 244), // Blue
@@ -976,12 +978,39 @@ constexpr int colorCount = int(std::size(g_chartColors));
 Gdiplus::Color GetChartColor(int i)
 {
     Gdiplus::Color baseColor = g_chartColors[i % colorCount];
-    int cycleGroup = (int)(i / colorCount);
-    float grayBlendFactor = std::min(0.8f, cycleGroup * 0.5f);
+    Gdiplus::Color nextColor = g_chartColors[(i + 1) % colorCount];
+    uint32_t cycleGroup = (uint32_t)(i / colorCount);
 
-    BYTE r = (BYTE)(std::lerp<float>(baseColor.GetR(), 128, grayBlendFactor));
-    BYTE g = (BYTE)(std::lerp<float>(baseColor.GetG(), 128, grayBlendFactor));
-    BYTE b = (BYTE)(std::lerp<float>(baseColor.GetB(), 128, grayBlendFactor));
+    BYTE r = baseColor.GetR();
+    BYTE g = baseColor.GetG();
+    BYTE b = baseColor.GetB();
+
+    if (cycleGroup > 0)
+    {
+        // Interpolate between adjacent colors in finer and finer increments the more colors there are:
+        //
+        // Color group    Fraction
+        // 0              1/1 no interpolation (base color)
+        // 1              1/2 between colors (wrapping around)
+        // 2              1/4 between colors
+        // 3              3/4 between colors
+        // 4              1/8 between colors
+        // 5              3/8 between colors
+        // 6              5/8 between colors
+        // 7              7/8 between colors
+        // 8              1/16 between colors
+        // ...
+
+        uint32_t cycleGroupDoubled = cycleGroup << 1;
+        uint32_t divisor = std::bit_floor(cycleGroupDoubled);
+        uint32_t divisorShift = std::countr_zero(divisor);
+        uint32_t numerator = (cycleGroupDoubled ^ divisor) + 1;
+        uint32_t numeratorInverse = divisor - numerator;
+
+        r = ((baseColor.GetR() * numerator) >> divisorShift) + ((nextColor.GetR() * numeratorInverse) >> divisorShift);
+        g = ((baseColor.GetG() * numerator) >> divisorShift) + ((nextColor.GetG() * numeratorInverse) >> divisorShift);
+        b = ((baseColor.GetB() * numerator) >> divisorShift) + ((nextColor.GetB() * numeratorInverse) >> divisorShift);
+    }
 
     Gdiplus::Color color(255, r, g, b);
     return color;
@@ -1202,13 +1231,14 @@ void DrawCalendar(HDC hdc, RECT& rect)
             continue;
 
         // Determine color from aggregated entries.
+        Gdiplus::Color color(0xFF000000 | backgroundColor); // Default to background color if not found.
         int colorIndex = 0;
         auto it = processToColorIndex.find(entry.processName);
         if (it != processToColorIndex.end())
         {
             colorIndex = it->second;
+            color = GetChartColor(colorIndex);
         }
-        Gdiplus::Color color = GetChartColor(colorIndex);
         Gdiplus::SolidBrush brush(color);
         Gdiplus::Pen borderPen(Gdiplus::Color(255, 100, 100, 100), 1.0f);
 
