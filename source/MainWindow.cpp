@@ -960,14 +960,14 @@ void RecalculateAggregatedData()
 
 Gdiplus::Color g_chartColors[] =
 {
-    Gdiplus::Color(255,  66, 133, 244),
-    Gdiplus::Color(255, 234,  67,  53),
-    Gdiplus::Color(255, 251, 188,   5),
-    Gdiplus::Color(255,  52, 168,  83),
-    Gdiplus::Color(255, 171,  71, 188),
-    Gdiplus::Color(255, 255, 112,  67),
-    Gdiplus::Color(255,   0, 172, 193),
-    Gdiplus::Color(255, 158, 158, 158)
+    Gdiplus::Color(255,  66, 133, 244), // Blue
+    Gdiplus::Color(255, 234,  67,  53), // Red
+    Gdiplus::Color(255, 251, 188,   5), // Yellow
+    Gdiplus::Color(255,  52, 168,  83), // Green
+    Gdiplus::Color(255, 171,  71, 188), // Purple
+    Gdiplus::Color(255, 255, 112,  67), // Orange
+    Gdiplus::Color(255,   0, 172, 193), // Cyan
+    Gdiplus::Color(255, 202,  70, 120), // Violet
 };
 constexpr int colorCount = int(std::size(g_chartColors));
 
