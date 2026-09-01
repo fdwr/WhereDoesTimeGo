@@ -1640,7 +1640,7 @@ void GetSuitableTimeEntriesSaveFilePath(bool defaultToDocumentsFolder, /*inout*/
         }
 
         SYSTEMTIME now;
-        GetSystemTime(&now);
+        GetLocalTime(&now);
         filePath.append(std::format(L"Untitled-{0:04}-{1:02}-{2:02}_{3:02}-{4:02}-{5:02}.wdtg.csv", now.wYear, now.wMonth, now.wDay, now.wHour, now.wMinute, now.wSecond));
     }
 }
