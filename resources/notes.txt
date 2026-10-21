@@ -1,4 +1,6 @@
 The icon making process:
+* This is silly - we need a better approach, like updating LunaSvgTest to export directly to 32-BPP BMP with the needed alpha channel.
+
 - Download Visual Studio 2026 Image Library:
   - https://learn.microsoft.com/en-us/visualstudio/designers/the-visual-studio-image-library?view=visualstudio
   - https://www.microsoft.com/en-us/download/details.aspx?id=35825
@@ -9,5 +11,3 @@ The icon making process:
   the alpha channel correctly), nor GIMP which causes LoadImage to fail. Exporting directly
   via LunaSvgTest to BMP also works, but the colors are slightly off because of premultiplied
   alpha issues. So XnView is the best option.
-
-* This is silly - we need a better approach, like updating LunaSvgTest to export directly to 32-BPP BMP with the needed alpha channel.

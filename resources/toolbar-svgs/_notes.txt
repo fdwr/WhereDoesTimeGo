@@ -1,0 +1,3 @@
+These SVGs come from the Visual Studio 2026 Image Library:
+
+https://learn.microsoft.com/en-us/visualstudio/designers/the-visual-studio-image-library?view=visualstudio
